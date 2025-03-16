@@ -1,0 +1,116 @@
+{
+    "file": {
+      "absolute_path": "/home/baivab/repos/tiff-to-cog-generation/final_dir/3RIMG_16OCT2024_0815_L1C_ASIA_MER_V01R00_IMG_COMBINED.tif",
+      "filename": "3RIMG_16OCT2024_0815_L1C_ASIA_MER_V01R00_IMG_COMBINED.tif",
+      "directory": "/home/baivab/repos/tiff-to-cog-generation/final_dir",
+      "size_bytes": 34412778,
+      "size_mb": 34.41,
+      "creation_time": "2025-03-17T02:45:15Z"
+    },
+    "raster": {
+      "dimensions": {
+        "width": 1737,
+        "height": 1616,
+        "bands": 6
+      },
+      "spatial_reference": {
+        "crs": "EPSG:4326 (Mercator)",
+        "transform": [4000.0, 0.0, -3473242.733735, 0.0, -4000.0, 5401854.420193],
+        "resolution_meters": {
+          "x": 4000.0,
+          "y": 4000.0
+        }
+      },
+      "format": {
+        "driver": "GTiff",
+        "compression": "LZW",
+        "photometric": "None"
+      }
+    },
+    "bands": [
+      {
+        "band_number": 1,
+        "statistics": {
+          "min": 0.0,
+          "max": 585.0,
+          "mean": 149.26,
+          "std_dev": 74.07
+        },
+        "properties": {
+          "nodata_value": 1023.0,
+          "color_interpretation": "1",
+          "data_type": "uint16"
+        }
+      },
+      {
+        "band_number": 2,
+        "statistics": {
+          "min": 380.0,
+          "max": 1023.0,
+          "mean": 804.67,
+          "std_dev": 101.03
+        },
+        "properties": {
+          "nodata_value": 1023.0,
+          "color_interpretation": "0",
+          "data_type": "uint16"
+        }
+      },
+      {
+        "band_number": 3,
+        "statistics": {
+          "min": 0.0,
+          "max": 593.0,
+          "mean": 186.70,
+          "std_dev": 106.20
+        },
+        "properties": {
+          "nodata_value": 1023.0,
+          "color_interpretation": "0",
+          "data_type": "uint16"
+        }
+      },
+      {
+        "band_number": 4,
+        "statistics": {
+          "min": 261.0,
+          "max": 1023.0,
+          "mean": 579.87,
+          "std_dev": 135.85
+        },
+        "properties": {
+          "nodata_value": 1023.0,
+          "color_interpretation": "0",
+          "data_type": "uint16"
+        }
+      },
+      {
+        "band_number": 5,
+        "statistics": {
+          "min": 314.0,
+          "max": 1023.0,
+          "mean": 599.07,
+          "std_dev": 122.17
+        },
+        "properties": {
+          "nodata_value": 1023.0,
+          "color_interpretation": "0",
+          "data_type": "uint16"
+        }
+      },
+      {
+        "band_number": 6,
+        "statistics": {
+          "min": 802.0,
+          "max": 1023.0,
+          "mean": 896.44,
+          "std_dev": 29.28
+        },
+        "properties": {
+          "nodata_value": 1023.0,
+          "color_interpretation": "0",
+          "data_type": "uint16"
+        }
+      }
+    ]
+  }
