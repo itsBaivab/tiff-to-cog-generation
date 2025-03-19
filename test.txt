@@ -1,5 +1,5 @@
 {
-  "description":"3RIMG_16OCT2024_0115_L1C_ASIA_MER_V01R00_IMG_COMBINED.tif",
+  "description":"3RIMG_16OCT2024_0115_L1C_ASIA_MER_V01R00.cog.tif",
   "driverShortName":"GTiff",
   "driverLongName":"GeoTIFF",
   "files":[

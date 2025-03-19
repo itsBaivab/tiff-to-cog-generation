@@ -1,0 +1,108 @@
+{
+    "productID": "3RIMG_12MAR2024_0815_L1C_ASIA_MER_V01R00",
+    "name": "3RIMG_12MAR2024_0815_L1C_ASIA_MER_V01R00",
+    "description": "3RIMG_12MAR2024_0815_L1C_ASIA_MER_V01R00",
+    "salellite": "INSAT3R",
+    "aquisition_data": "2024-03-12"
+    "processing_level": "L1C",
+    "version": "01",
+    "revision": "00",
+
+    "filename": "3RIMG_12MAR2024_0815_L1C_ASIA_MER_V01R00_IMG_COMBINED.cog.tif",
+    "filepath": "/COG/3RIMG/2024/30/12"
+    "coverage": {
+        "lat1": 44.53,
+        "lat2": 44.53,
+        "lon1": 44.53,
+        "lon2": 44.53
+    },
+    "cordinate_system": "EPSG:4326",
+    "size": {
+        "width": 1737,
+        "height": 1616,
+        "bands": 6
+    },
+    "coornercoords":{
+        "upperleft":[
+            44.53,
+            44.53
+        ],
+        "lowerleft":[
+            44.53,
+            44.53
+        ],
+        "upperright":[
+            44.53,
+            44.53
+        ],
+        "lowerright":[
+            44.53,
+            44.53
+        ],
+        "center":[
+            44.53,
+            44.53
+        ]
+    },
+    "bands":[{
+        "bandID": 1,
+        "type": "uint16",
+        "colorInterpretation": "1",
+        "min": 0.0,
+        "max": 585.0,
+        "mean": 149.26,
+        "std_dev": 74.07,
+        "nodata_value": 1023.0
+    },
+    {
+        "bandID": 2,
+        "type": "uint16",
+        "colorInterpretation": "0",
+        "min": 380.0,
+        "max": 1023.0,
+        "mean": 804.67,
+        "std_dev": 101.03,
+        "nodata_value": 1023.0
+    },
+    {
+        "bandID": 3,
+        "type": "uint16",
+        "colorInterpretation": "0",
+        "min": 0.0,
+        "max": 593.0,
+        "mean": 149.26,
+        "std_dev": 74.07,
+        "nodata_value": 1023.0
+    },
+    {
+        "bandID": 4,
+        "type": "uint16",
+        "colorInterpretation": "0",
+        "min": 0.0,
+        "max": 593.0,
+        "mean": 149.26,
+        "std_dev": 74.07,
+        "nodata_value": 1023.0
+    },
+    {
+        "bandID": 5,
+        "type": "uint16",
+        "colorInterpretation": "0",
+        "min": 0.0,
+        "max": 593.0,
+        "mean": 149.26,
+        "std_dev": 74.07,
+        "nodata_value": 1023.0
+    },
+    {
+        "bandID": 6,
+        "type": "uint16",
+        "colorInterpretation": "0",
+        "min": 0.0,
+        "max": 593.0,
+        "mean": 149.26,
+        "std_dev": 74.07,
+        "nodata_value": 1023.0
+    }
+]
+}

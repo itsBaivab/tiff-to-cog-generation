@@ -1,116 +1,85 @@
-{
-    "file": {
-      "absolute_path": "/home/baivab/repos/tiff-to-cog-generation/final_dir/3RIMG_16OCT2024_0815_L1C_ASIA_MER_V01R00_IMG_COMBINED.tif",
-      "filename": "3RIMG_16OCT2024_0815_L1C_ASIA_MER_V01R00_IMG_COMBINED.tif",
-      "directory": "/home/baivab/repos/tiff-to-cog-generation/final_dir",
-      "size_bytes": 34412778,
-      "size_mb": 34.41,
-      "creation_time": "2025-03-17T02:45:15Z"
-    },
-    "raster": {
-      "dimensions": {
-        "width": 1737,
-        "height": 1616,
-        "bands": 6
-      },
-      "spatial_reference": {
-        "crs": "EPSG:4326 (Mercator)",
-        "transform": [4000.0, 0.0, -3473242.733735, 0.0, -4000.0, 5401854.420193],
-        "resolution_meters": {
-          "x": 4000.0,
-          "y": 4000.0
-        }
-      },
-      "format": {
-        "driver": "GTiff",
-        "compression": "LZW",
-        "photometric": "None"
-      }
-    },
-    "bands": [
-      {
-        "band_number": 1,
-        "statistics": {
-          "min": 0.0,
-          "max": 585.0,
-          "mean": 149.26,
-          "std_dev": 74.07
-        },
-        "properties": {
-          "nodata_value": 1023.0,
-          "color_interpretation": "1",
-          "data_type": "uint16"
-        }
-      },
-      {
-        "band_number": 2,
-        "statistics": {
-          "min": 380.0,
-          "max": 1023.0,
-          "mean": 804.67,
-          "std_dev": 101.03
-        },
-        "properties": {
-          "nodata_value": 1023.0,
-          "color_interpretation": "0",
-          "data_type": "uint16"
-        }
-      },
-      {
-        "band_number": 3,
-        "statistics": {
-          "min": 0.0,
-          "max": 593.0,
-          "mean": 186.70,
-          "std_dev": 106.20
-        },
-        "properties": {
-          "nodata_value": 1023.0,
-          "color_interpretation": "0",
-          "data_type": "uint16"
-        }
-      },
-      {
-        "band_number": 4,
-        "statistics": {
-          "min": 261.0,
-          "max": 1023.0,
-          "mean": 579.87,
-          "std_dev": 135.85
-        },
-        "properties": {
-          "nodata_value": 1023.0,
-          "color_interpretation": "0",
-          "data_type": "uint16"
-        }
-      },
-      {
-        "band_number": 5,
-        "statistics": {
-          "min": 314.0,
-          "max": 1023.0,
-          "mean": 599.07,
-          "std_dev": 122.17
-        },
-        "properties": {
-          "nodata_value": 1023.0,
-          "color_interpretation": "0",
-          "data_type": "uint16"
-        }
-      },
-      {
-        "band_number": 6,
-        "statistics": {
-          "min": 802.0,
-          "max": 1023.0,
-          "mean": 896.44,
-          "std_dev": 29.28
-        },
-        "properties": {
-          "nodata_value": 1023.0,
-          "color_interpretation": "0",
-          "data_type": "uint16"
-        }
-      }
+{'productID': '3RIMG_16OCT2024_0815_L1C_ASIA_MER_V01R00', 'name': '3RIMG_16OCT2024_0815_L1C_ASIA_MER_V01R00', 'description': '3RIMG_16OCT2024_0815_L1C_ASIA_MER_V01R00', 'satellite': 'INSAT3R', 'aquisition_data': '2024-10-16', 'processing_level': 'L1C', 'version': '01', 'revision': '00', 'filename': '3RIMG_16OCT2024_0815_L1C_ASIA_MER_V01R00.cog.tif', 'filepath': '/home/baivab/repos/tiff-to-cog-generation/final_dir', 'coverage': {'lat1': -1062145.5798070002, 'lat2': 5401854.420193, 'lon1': -3473242.733735, 'lon2': 3474757.266265
+  }, 'cordinate_system': 'PROJCS[
+    "Mercator",GEOGCS[
+      "WGS 84",DATUM[
+        "WGS_1984",SPHEROID[
+          "WGS 84",
+          6378137,
+          298.257223563,AUTHORITY[
+            "EPSG",
+            "7030"
+          ]
+        ],AUTHORITY[
+          "EPSG",
+          "6326"
+        ]
+      ],PRIMEM[
+        "Greenwich",
+        0
+      ],UNIT[
+        "degree",
+        0.0174532925199433,AUTHORITY[
+          "EPSG",
+          "9122"
+        ]
+      ],AUTHORITY[
+        "EPSG",
+        "4326"
+      ]
+    ],PROJECTION[
+      "Mercator_2SP"
+    ],PARAMETER[
+      "standard_parallel_1",
+      17.75
+    ],PARAMETER[
+      "central_meridian",
+      77.25
+    ],PARAMETER[
+      "false_easting",
+      0
+    ],PARAMETER[
+      "false_northing",
+      0
+    ],UNIT[
+      "metre",
+      1,AUTHORITY[
+        "EPSG",
+        "9001"
+      ]
+    ],AXIS[
+      "Easting",EAST
+    ],AXIS[
+      "Northing",NORTH
     ]
-  }
+  ]', 'size': {'width': 1737, 'height': 1616, 'bands': 6
+  }, 'coornercoords': {'upperleft': [
+      -3473242.733735,
+      5401854.420193
+    ], 'lowerleft': [
+      -3473242.733735,
+      -1062145.5798070002
+    ], 'upperright': [
+      3474757.266265,
+      5401854.420193
+    ], 'lowerright': [
+      3474757.266265,
+      -1062145.5798070002
+    ], 'center': [
+      757.2662650002167,
+      2169854.4201929998
+    ]
+  }, 'bands': [
+    {'bandID': 1, 'type': 'uint16', 'colorInterpretation': '1', 'min': 0.0, 'max': 585.0, 'mean': 149.25873319197206, 'std_dev': 74.06848240560444, 'nodata_value': 1023.0
+    },
+    {'bandID': 2, 'type': 'uint16', 'colorInterpretation': '0', 'min': 380.0, 'max': 1023.0, 'mean': 804.6721401414753, 'std_dev': 101.03315740371474, 'nodata_value': 1023.0
+    },
+    {'bandID': 3, 'type': 'uint16', 'colorInterpretation': '0', 'min': 0.0, 'max': 593.0, 'mean': 186.69642307495, 'std_dev': 106.19747620107407, 'nodata_value': 1023.0
+    },
+    {'bandID': 4, 'type': 'uint16', 'colorInterpretation': '0', 'min': 261.0, 'max': 1023.0, 'mean': 579.8689476136733, 'std_dev': 135.85112191373597, 'nodata_value': 1023.0
+    },
+    {'bandID': 5, 'type': 'uint16', 'colorInterpretation': '0', 'min': 314.0, 'max': 1023.0, 'mean': 599.0657479608064, 'std_dev': 122.17151889102777, 'nodata_value': 1023.0
+    },
+    {'bandID': 6, 'type': 'uint16', 'colorInterpretation': '0', 'min': 802.0, 'max': 1023.0, 'mean': 896.4398167148321, 'std_dev': 29.281517095448823, 'nodata_value': 1023.0
+    }
+  ]
+}

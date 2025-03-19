@@ -82,5 +82,5 @@ if __name__ == "__main__":
 
     ]
     
-    output_file = 'final_dir/3RIMG_16OCT2024_0815_L1C_ASIA_MER_V01R00_IMG_COMBINED.tif'
+    output_file = 'final_dir/3RIMG_16OCT2024_0815_L1C_ASIA_MER_V01R00.cog.tif'
     combine_cogs(input_files, output_file)
