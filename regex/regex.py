@@ -11,8 +11,8 @@ filenames = [
     "3RIMG_16OCT2024_0115_L1C_ASIA_MER_V01R00_IMG_WV.tif"
 ]
 
-# Regex pattern to extract relevant information
-pattern = re.compile(r'(?P<satellite>\d[DR]IMG)_(?P<date>\d{2}[A-Z]{3}\d{4})_(?P<time>\d{4})_(?P<level>L1C)_(?P<region>ASIA)_(?P<type>MER)_(?P<version>V\d{2}R\d{2})(?:_IMG_(?P<band>[A-Z0-9]+))?')
+# Regex pattern to match only `.tif` files
+pattern = re.compile(r'(?P<satellite>\d[DR]IMG)_(?P<date>\d{2}[A-Z]{3}\d{4})_(?P<time>\d{4})_(?P<level>L1C)_(?P<sector>ASIA_MER)_(?P<version>V\d{2}R\d{2})_IMG_(?P<band>[A-Z0-9]+)\.tif$')
 
 # Extracted data storage
 data_list = []
