@@ -1,0 +1,344 @@
+**Regex Documentation for Extracting Satellite Data from Filenames**
+
+### **Regex Pattern:**
+```regex
+(?P<satellite>\d[DR]IMG)_(?P<date>\d{2}[A-Z]{3}\d{4})_(?P<time>\d{4})_(?P<level>L1C)_(?P<sector>ASIA_MER)_(?P<version>V\d{2}R\d{2})_IMG_(?P<band>[A-Z0-9]+)\.tif$
+```
+
+---
+
+### **Explanation of Each Captured Group:**
+
+1. **`(?P<satellite>\d[DR]IMG)`**
+   - Matches the satellite identifier.
+   - `\d` ensures the first character is a digit (e.g., `3` in `3RIMG`).
+   - `[DR]` ensures the next character is either `D` or `R` (e.g., `DIMG` or `RIMG`).
+   - `IMG` is a fixed string indicating an image dataset.
+
+2. **`(?P<date>\d{2}[A-Z]{3}\d{4})`**
+   - Matches the date in the format `DDMMMYYYY`.
+   - `\d{2}` captures the two-digit day (e.g., `16` in `16OCT2024`).
+   - `[A-Z]{3}` ensures a three-letter uppercase month (e.g., `OCT`).
+   - `\d{4}` captures the four-digit year (e.g., `2024`).
+
+3. **`(?P<time>\d{4})`**
+   - Matches the time in HHMM format (e.g., `0115` for 01:15 UTC).
+
+4. **`(?P<level>L1C)`**
+   - Matches the processing level.
+   - Fixed as `L1C`, indicating Level 1C data.
+
+5. **`(?P<sector>ASIA_MER)`**
+   - Captures the region and mission type.
+   - Fixed as `ASIA_MER`, representing the Asian region with MER mission data.
+
+6. **`(?P<version>V\d{2}R\d{2})`**
+   - Matches the versioning information.
+   - `V\d{2}` captures the major version (e.g., `V01`).
+   - `R\d{2}` captures the revision number (e.g., `R00`).
+
+7. **`(?P<band>[A-Z0-9]+)`**
+   - Matches the spectral band identifier.
+   - Examples: `MIR`, `SWIR`, `TIR1`, `TIR2`, `VIS`, `WV`.
+
+8. **`\.tif$`**
+   - Ensures the filename ends with `.tif` (ignoring auxiliary files like `.xml`).
+
+---
+
+### **Example Filenames and Extracted Data:**
+
+#### **Filename:**
+```
+3RIMG_16OCT2024_0115_L1C_ASIA_MER_V01R00_IMG_MIR.tif
+```
+#### **Extracted Data:**
+```json
+{
+    "satellite": "3RIMG",
+    "date": "16OCT2024",
+    "time": "0115",
+    "level": "L1C",
+    "sector": "ASIA_MER",
+    "version": "V01R00",
+    "band": "MIR"
+}
+```
+
+#### **Filename:**
+```
+3RIMG_16OCT2024_0115_L1C_ASIA_MER_V01R00_IMG_WV.tif
+```
+#### **Extracted Data:**
+```json
+{
+    "satellite": "3RIMG",
+    "date": "16OCT2024",
+    "time": "0115",
+    "level": "L1C",
+    "sector": "ASIA_MER",
+    "version": "V01R00",
+    "band": "WV"
+}
+```
+
+---
+
+### **Use Case:**
+- This regex pattern is useful for extracting metadata from satellite image filenames in an automated pipeline.
+- It ensures only `.tif` files are processed and ignores metadata files like `.xml`.
+- It can be integrated into scripts for data validation and cataloging.
+
+**End of Documentation**
+
+
+
+**Regular Expressions (Regex) Guide: From Zero to Advanced**
+
+## Introduction to Regular Expressions
+Regular Expressions (Regex) are patterns used to match character combinations in strings. They are commonly used in search operations, validation, and text processing.
+
+## Basic Syntax
+
+### 1. **Literal Characters**
+- `abc` matches exactly "abc"
+- `123` matches exactly "123"
+
+### 2. **Metacharacters**
+Metacharacters have special meanings:
+- `.` Matches any character except a newline
+- `^` Matches the start of a string
+- `$` Matches the end of a string
+- `\` Escapes a metacharacter (e.g., `\.` matches a literal dot)
+
+### 3. **Character Classes**
+- `[abc]` Matches any single character from the set {a, b, c}
+- `[^abc]` Matches any character **except** a, b, or c
+- `[0-9]` Matches any digit
+- `[a-zA-Z]` Matches any letter (both lowercase and uppercase)
+- `\d` Matches any digit (equivalent to `[0-9]`)
+- `\D` Matches any non-digit
+- `\w` Matches any word character (letters, digits, underscore)
+- `\W` Matches any non-word character
+- `\s` Matches any whitespace character
+- `\S` Matches any non-whitespace character
+
+### 4. **Quantifiers**
+Quantifiers specify how many times a character, group, or class should appear.
+- `*` Matches **0 or more** occurrences (greedy)
+- `+` Matches **1 or more** occurrences
+- `?` Matches **0 or 1** occurrences
+- `{n}` Matches exactly **n** occurrences
+- `{n,}` Matches **at least n** occurrences
+- `{n,m}` Matches between **n and m** occurrences
+
+### 5. **Grouping and Capturing**
+- `()` Groups expressions and captures matched text
+- `(?: )` Groups expressions **without** capturing
+- `\1, \2` References captured groups
+
+### 6. **Alternation and Anchors**
+- `|` Acts as an OR operator (e.g., `cat|dog` matches "cat" or "dog")
+- `^` Matches the start of a string (e.g., `^Hello` matches "Hello" at the start of a line)
+- `$` Matches the end of a string (e.g., `world$` matches "world" at the end of a line)
+
+## Intermediate Concepts
+
+### 1. **Lookaheads and Lookbehinds**
+- **Positive Lookahead**: `foo(?=bar)` Matches "foo" **only if** "bar" follows
+- **Negative Lookahead**: `foo(?!bar)` Matches "foo" **only if** "bar" does NOT follow
+- **Positive Lookbehind**: `(?<=bar)foo` Matches "foo" **only if** "bar" precedes it
+- **Negative Lookbehind**: `(?<!bar)foo` Matches "foo" **only if** "bar" does NOT precede it
+
+### 2. **Greedy vs Lazy Matching**
+- `.*` (greedy) Matches as much as possible
+- `.*?` (lazy) Matches as little as possible
+
+### 3. **Backreferences**
+- `(\w+) \1` Matches repeated words like "hello hello"
+
+## Advanced Techniques
+
+### 1. **Named Capturing Groups**
+- `(?<name>regex)` Assigns a name to a capturing group
+- `\k<name>` Refers to the named group
+
+### 2. **Conditional Expressions**
+- `(?ifthen|else)` Executes different regex patterns based on conditions
+
+### 3. **Unicode and Special Character Matching**
+- `\p{L}` Matches any letter in Unicode
+- `\p{N}` Matches any number in Unicode
+
+## Practical Applications
+
+### 1. **Email Validation**
+```
+^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$
+```
+
+### 2. **Phone Number Validation**
+```
+^\+?[0-9]{1,3}[-.\s]?[0-9]{2,4}[-.\s]?[0-9]{4,}$
+```
+
+### 3. **Extracting URLs**
+```
+https?://[\w.-]+(?:\.[a-zA-Z]{2,6})+(?:/\S*)?
+```
+
+### 4. **Finding Dates in YYYY-MM-DD Format**
+```
+\b\d{4}-\d{2}-\d{2}\b
+```
+
+### 5. **Password Strength Validation**
+```
+^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$
+```
+
+## Conclusion
+Regular expressions are powerful tools for text manipulation. Mastering them can significantly improve efficiency in data extraction, validation, and searching operations.
+
+Here are some useful regex patterns along with their explanations:
+
+---
+
+### **1. Match an Email Address**
+#### **Regex:**
+```
+^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$
+```
+#### **Explanation:**
+- `^` → Start of the string  
+- `[a-zA-Z0-9_.+-]+` → Matches username part (allows letters, numbers, `_`, `.`, `+`, and `-`)  
+- `@` → The literal `@` symbol  
+- `[a-zA-Z0-9-]+` → Matches domain name (e.g., `gmail`, `yahoo`)  
+- `\.` → Escapes dot `.` to match a literal dot  
+- `[a-zA-Z0-9-.]+` → Matches domain extension (e.g., `.com`, `.org`, `.co.uk`)  
+- `$` → End of the string  
+
+✔ **Example Matches:** `user.name@example.com`, `user123@domain.io`  
+❌ **Non-Matches:** `user@@example.com`, `user@domain`
+
+---
+
+### **2. Match a Strong Password (Minimum 8 characters, 1 uppercase, 1 lowercase, 1 digit, 1 special character)**
+#### **Regex:**
+```
+^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$
+```
+#### **Explanation:**
+- `^` → Start of the string  
+- `(?=.*[A-Z])` → At least one uppercase letter  
+- `(?=.*[a-z])` → At least one lowercase letter  
+- `(?=.*\d)` → At least one digit  
+- `(?=.*[@$!%*?&])` → At least one special character  
+- `[A-Za-z\d@$!%*?&]{8,}` → Matches 8 or more characters from allowed set  
+- `$` → End of the string  
+
+✔ **Example Matches:** `P@ssw0rd!`, `Hello@123`  
+❌ **Non-Matches:** `password`, `Pass123`, `P@ssword` (missing numbers)
+
+---
+
+### **3. Match a URL (with or without `http://` or `https://`)**
+#### **Regex:**
+```
+https?:\/\/[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}\/?[^\s]*$
+```
+#### **Explanation:**
+- `https?` → Matches `http` or `https`  
+- `:\/\/` → Matches `://` literally  
+- `[a-zA-Z0-9.-]+` → Matches domain name (letters, numbers, dots, and dashes)  
+- `\.[a-zA-Z]{2,6}` → Matches top-level domain (e.g., `.com`, `.org`, `.net`)  
+- `\/?` → Matches optional `/` at the end  
+- `[^\s]*` → Matches everything after the domain except spaces  
+
+✔ **Example Matches:** `http://example.com`, `https://www.google.com/search?q=regex`  
+❌ **Non-Matches:** `htp://example.com`, `example.com` (missing `http` or `https`)
+
+---
+
+### **4. Match a Date (YYYY-MM-DD)**
+#### **Regex:**
+```
+\b\d{4}-\d{2}-\d{2}\b
+```
+#### **Explanation:**
+- `\b` → Word boundary (ensures it's a standalone date)  
+- `\d{4}` → Matches a 4-digit year  
+- `-` → Matches a hyphen  
+- `\d{2}` → Matches a 2-digit month  
+- `-` → Matches another hyphen  
+- `\d{2}` → Matches a 2-digit day  
+- `\b` → Word boundary  
+
+✔ **Example Matches:** `2023-07-15`, `1999-12-31`  
+❌ **Non-Matches:** `23-07-15`, `2023/07/15`
+
+---
+
+### **5. Match an IPv4 Address**
+#### **Regex:**
+```
+\b((25[0-5]|2[0-4][0-9]|1?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|1?[0-9][0-9]?)\b
+```
+#### **Explanation:**
+- `\b` → Word boundary  
+- `((25[0-5]|2[0-4][0-9]|1?[0-9][0-9]?)\.){3}` → Matches first 3 octets (0-255)  
+- `(25[0-5]|2[0-4][0-9]|1?[0-9][0-9]?)` → Matches last octet (0-255)  
+- `\b` → Word boundary  
+
+✔ **Example Matches:** `192.168.1.1`, `255.255.255.255`  
+❌ **Non-Matches:** `256.100.50.25`, `192.168.1`
+
+---
+
+### **6. Match a Hex Color Code**
+#### **Regex:**
+```
+#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})
+```
+#### **Explanation:**
+- `#` → Matches `#` at the start  
+- `[A-Fa-f0-9]{6}` → Matches a 6-digit hex code  
+- `|` → OR operator  
+- `[A-Fa-f0-9]{3}` → Matches a 3-digit hex code  
+
+✔ **Example Matches:** `#ffffff`, `#123ABC`, `#f00`  
+❌ **Non-Matches:** `#12345`, `123ABC`
+
+---
+
+### **7. Match a File Path**
+#### **Regex:**
+```
+([a-zA-Z]:\\)?(\\[a-zA-Z0-9_-]+)+\\?
+```
+#### **Explanation:**
+- `([a-zA-Z]:\\)?` → Matches optional drive letter (`C:\`)  
+- `(\\[a-zA-Z0-9_-]+)+` → Matches folder names separated by `\`  
+- `\\?` → Matches optional trailing `\`  
+
+✔ **Example Matches:** `C:\Users\Admin\Documents\file.txt`, `\home\user\file.txt`  
+❌ **Non-Matches:** `C:/Users/Admin`, `/home/user/file.txt`
+
+---
+
+### **8. Extract HTML Tags**
+#### **Regex:**
+```
+<([a-zA-Z]+)([^>]*)>(.*?)<\/\1>
+```
+#### **Explanation:**
+- `<([a-zA-Z]+)` → Captures opening tag name  
+- `([^>]*)` → Captures attributes  
+- `>(.*?)<\/\1>` → Matches content inside and ensures matching closing tag  
+
+✔ **Example Matches:** `<p>Hello</p>`, `<div class="box">Content</div>`  
+❌ **Non-Matches:** `<p>Hello`, `<div class='box'>`
+
+---
+
+These regex patterns cover a variety of real-world scenarios. Let me know if you need a custom regex for a specific use case! 🚀
