@@ -115,14 +115,25 @@ class EventHandler(FileSystemEventHandler):
         #return dirpath,tfilename
 
     def create_cog(self,input_gtif:str,output_cog:str):
-        #gdal.Translate(output_cog,input_gtif,format="COG",options=["COMPRESS=LZW","BIGTIFF=IF_SAFER"])
-        #translate_options = gdal.TranslateOptions(format="COG",createOptions=["COMPRESS=LZW","BIGTIFF=IF_SAFER"])
-        #gdal.Translate(output_cog,input_gtif,options=["format=COG","COMPRESS=LZW","BIGTIFF=IF_SAFER"])
         create_options = ["COMPRESS=LZW","BIGTIFF=IF_SAFER","RESAMPLING=NEAREST"]
         src_ds = gdal.Open(input_gtif,gdal.GA_ReadOnly)
-        gdal.Translate(output_cog,src_ds,format='COG',creationOptions=create_options)
+        
+        # Get the band description before translation
+        band_desc = None
+        if src_ds.RasterCount > 0:
+            band = src_ds.GetRasterBand(1)
+            band_desc = band.GetDescription()
+        
+        # Create the COG
+        dst_ds = gdal.Translate(output_cog, src_ds, format='COG', creationOptions=create_options)
+        
+        # Set the band description in the output file if one was found
+        if band_desc and dst_ds:
+            out_band = dst_ds.GetRasterBand(1)
+            out_band.SetDescription(band_desc)
+            dst_ds = None
+        
         src_ds = None
-
 
     def resample_and_merge(self,input_files:list,output_file:str):
         predict_seq = ['IMG_VIS','IMG_SWIR','IMG_TIR1','IMG_TIR2','IMG_MIR','IMG_WV','VIS_RADIANCE','SWIR_RADIANCE','TIR1_RADIANCE','TIR2_RADIANCE','MIR_RADIANCE','WV_RADIANCE','TIR1_TEMP','TIR2_TEMP','MIR_TEMP','WV_TEMP']
