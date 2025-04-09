@@ -147,21 +147,18 @@ class EventHandler(FileSystemEventHandler):
         geotransform = src.GetGeoTransform()
         projection = src.GetProjection()
 
-
         driver = gdal.GetDriverByName('GTiff')
         outputs = driver.Create(output_file,cols,rows,len(input_files),gdal.GDT_Float32)
         outputs.SetGeoTransform(geotransform)
         outputs.SetProjection(projection)
 
-
         for idx,file in enumerate(input_files):
-            cog_gtif_file = f"{os.path.splitext(file)[0]}.cog.tif"            
             src_ds = gdal.Open(file,gdal.GA_ReadOnly)
             xcols = src_ds.RasterXSize
             yrows = src_ds.RasterYSize
 
             if cols != xcols or rows != yrows:
-
+                # Process resampling... (existing code)
                 metadata = src_ds.GetRasterBand(1).GetMetadata()
                 nodata_value = src_ds.GetRasterBand(1).GetNoDataValue()
                 
@@ -169,48 +166,52 @@ class EventHandler(FileSystemEventHandler):
                 dst_ds.SetGeoTransform(geotransform)
                 dst_ds.SetProjection(projection)
 
-                #ws = gdal.Warp(dst_ds, src_ds,resampleAlg="near",srcNodata=nodata_value,dstNodata=nodata_value,multithread=True)
                 gdal.ReprojectImage(src_ds, dst_ds)
 
-
                 band = dst_ds.GetRasterBand(1).ReadAsArray()
-                #if 'IMG_VIS' in file or 'IMG_SWIR' in file:
                 print(f"source nodata value: {nodata_value}")
-                #band[band == nodata_value] = target_nodata
                 band[band == 0] = target_nodata
 
                 b1 = outputs.GetRasterBand(idx+1)
                 b1.SetMetadata(metadata)
                 b1.SetStatistics(np.float64(metadata['MIN']),np.float64(metadata['MAX']),np.float64(metadata['MEAN']),np.float64(metadata['STD_DEV'])) 
-                #b1.SetNoDataValue(nodata_value)
                 b1.SetNoDataValue(target_nodata)
                 b1.WriteArray(band)
                 b1.SetDescription(predict_seq[idx])
                 src_ds = None
-                ouputs = None
                 dst_ds = None
             else:
+                # Process without resampling... (existing code)
                 metadata = src_ds.GetRasterBand(1).GetMetadata()
                 nodata_value = src_ds.GetRasterBand(1).GetNoDataValue()
 
                 band = src_ds.GetRasterBand(1).ReadAsArray()
-                #if 'IMG_VIS' in file or 'IMG_SWIR' in file:
-                #    band[band == 0] = 1023
                 band= band.astype(np.float32)
                 band[band == nodata_value] = target_nodata
                 b1 = outputs.GetRasterBand(idx+1)
                 b1.SetMetadata(metadata)
                 b1.SetStatistics(np.float64(metadata['MIN']),np.float64(metadata['MAX']),np.float64(metadata['MEAN']),np.float64(metadata['STD_DEV'])) 
-                #b1.SetNoDataValue(nodata_value)
                 b1.SetNoDataValue(target_nodata)
                 b1.WriteArray(band)
                 b1.SetDescription(predict_seq[idx])
                 src_ds = None
             
-            self.create_cog(file,cog_gtif_file)
+            # Only create COG files for VIS/SWIR files
+            if 'IMG_VIS' in file or 'IMG_SWIR' in file:
+                cog_gtif_file = f"{os.path.splitext(file)[0]}.cog.tif"
+                self.create_cog(file, cog_gtif_file)
+                print(f"Created COG for VIS/SWIR file: {file}")
+            else:
+                print(f"Skipping COG creation for non-VIS/SWIR file: {file}")
+                
+            # Remove original file in all cases
             os.remove(file)
-        ouputs = None
-        print("Merging Process Completed") 
+        
+        # Note: We're no longer creating COG for the multiband file here
+        # That is now handled in the on_created method
+        
+        outputs = None
+        print("Merging Process Completed")
 
     def get_band_stats(band,fill_value=None):
 
@@ -270,36 +271,41 @@ class EventHandler(FileSystemEventHandler):
         if ext != '.tif' or '.cog' in fl:
             return
         
-        # Fix 1: Check if file exists before trying to access it
+        # Check if file exists before trying to access it
         if not os.path.exists(event.src_path):
             print(f"File not found immediately after creation event: {event.src_path}")
             return
             
         try:
-            # Fix 2: Use proper wait_for_file_stability method (fix self reference)
+            # Wait for file stability
             if not self.wait_for_file_stability(event.src_path, timeout=60, check_interval=1):
                 print(f"File may not be completely written: {event.src_path}")
                 return
                 
             # Now it's safe to continue with processing
             if '_L1B_' in fl:
-                #print(f"Eureka")
                 mtch,satsen = self.parse_insat_filename(fl)
                 directory = os.path.join(self.outputdir,satsen.group(1),mtch.group(3),self.Months[mtch.group(2)],mtch.group(1))
                 groups_l1b = get_l1b_listing(directory)
                 for key,group in groups_l1b.items():
-                    if (len(group)) == 16 and 'WV_RADIANCE' in fl :
+                    if (len(group)) == 16 and 'WV_RADIANCE' in fl:
+                        # This is a multiband file processing
                         abs_file = [os.path.join(directory,file) for file in group]
                         abs_file = rearrange = sorted(abs_file, key = lambda x: predict_seq.index(next(filter(lambda y: y in x, predict_seq),' ')))
                         merge_gtif_file = f"{directory}{os.sep}{key}.tif"
                         cog_gtif_file = f"{directory}{os.sep}{key}.cog.tif"
-                        merge_cmd = f'python {self.merge_script} -separate -o {merge_gtif_file} {" ".join(abs_file)}'
-                        self.resample_and_merge(abs_file,merge_gtif_file)
-                        self.create_cog(merge_gtif_file,cog_gtif_file)
-                        #os.remove(merge_gtif_file)
+                        
+                        # Process the merge - this will create individual COGs for VIS/SWIR
+                        # and will create a multiband file
+                        self.resample_and_merge(abs_file, merge_gtif_file)
+                        
+                        # Create COG for the multiband file
+                        self.create_cog(merge_gtif_file, cog_gtif_file)
+                        print(f"Created COG for multiband file: {merge_gtif_file}")
+                        # Remove the original multiband file
+                        os.remove(merge_gtif_file)
                     
             elif '_L1C_' in fl:
-
                 mtch,satsen = self.parse_insat_filename(fl)
                 directory = os.path.join(self.outputdir,satsen.group(1),mtch.group(3),self.Months[mtch.group(2)],mtch.group(1))
 
@@ -310,21 +316,33 @@ class EventHandler(FileSystemEventHandler):
 
                 for key,group in groups_l1c.items():
                     if (len(group)) == 16 and 'WV_RADIANCE' in fl:
+                        # This is a multiband file processing
                         abs_file = [os.path.join(directory,file) for file in group]
                         abs_file = rearrange = sorted(abs_file, key = lambda x: predict_seq.index(next(filter(lambda y: y in x, predict_seq),' ')))
                         merge_gtif_file = f"{directory}{os.sep}{key}.tif"
                         cog_gtif_file = f"{directory}{os.sep}{key}.cog.tif"
-                        merge_cmd = f'python {self.merge_script} -separate -o {merge_gtif_file} {" ".join(abs_file)}'
-                        self.resample_and_merge(abs_file,merge_gtif_file)
-                        self.create_cog(merge_gtif_file,cog_gtif_file)
-                        #os.remove(merge_gtif_file)
+                        
+                        # Process the merge - this will create individual COGs for VIS/SWIR
+                        # and will create a multiband file
+                        self.resample_and_merge(abs_file, merge_gtif_file)
+                        
+                        # Create COG for the multiband file
+                        self.create_cog(merge_gtif_file, cog_gtif_file)
+                        print(f"Created COG for multiband file: {merge_gtif_file}")
+                        # Remove the original multiband file
+                        os.remove(merge_gtif_file)
 
             elif '_L2C_' in fl or '_L2B_' in fl or '_L3C_' in fl or '_L3B_' in fl:
                 input_filename = str(event.src_path)
-                flname,ext = os.path.splitext(input_filename)
-                cog_gtif_file = '%s.cog%s'%(flname,ext)
-                self.create_cog(input_filename,cog_gtif_file)
-                #os.remove(input_filename)
+                
+                # Only create COG for VIS/SWIR files
+                if 'IMG_VIS' in fl or 'IMG_SWIR' in fl or 'VIS_RADIANCE' in fl or 'SWIR_RADIANCE' in fl:
+                    flname, ext = os.path.splitext(input_filename)
+                    cog_gtif_file = f"{flname}.cog{ext}"
+                    self.create_cog(input_filename, cog_gtif_file)
+                    print(f"Created COG for VIS/SWIR file: {input_filename}")
+                else:
+                    print(f"Skipping COG creation for non-VIS/SWIR file: {input_filename}")
 
         except Exception as e:
             print(f"Error processing file {event.src_path}: {str(e)}")

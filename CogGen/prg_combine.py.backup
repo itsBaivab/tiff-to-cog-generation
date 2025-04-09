@@ -1,0 +1,266 @@
+import numpy as np
+import h5py as h5
+import sys
+import os 
+from osgeo import gdal
+from osgeo import osr
+import pyproj
+from watchdog.observers.polling import PollingObserver
+from watchdog.events import FileSystemEventHandler
+import time
+import re
+from datetime import datetime
+#from geos_gtif import create_geotif
+import cartopy.io.shapereader as shpreader
+from cartopy.feature import ShapelyFeature
+import cartopy, cartopy.crs as ccrs
+import configparser
+import time
+import statistics
+from collections import defaultdict
+
+logs_dir = '/usr/local/logs/CogGen'
+
+def write_log(rule,message,level='INFO'):
+    log_file_name = get_dynamic_log_file_name(rule)
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    log_entry = f'{timestamp} - {level} - {rule} - {message}\n'
+    with open(log_file_name,'a') as log_file:
+        log_file.write(log_entry)
+    log_file.close()
+
+def get_dynamic_log_file_name(rule='COGGEN'):
+    now = datetime.now()
+    #print('----',os.getcwd())
+    return os.path.join(logs_dir,f'{rule}_log_{now.strftime("%Y%m%d")}.log')
+
+def get_l1b_listing(inp_directory:str):
+    pattern_l1b = re.compile(r"^(3RIMG_\d{2}[A-Za-z]{3}\d{4}_\d{4}_L\d{1}[A-Za-z]{1})_([^_]+_[^_]+)_(V\d{2}R\d{2})\.tif$")
+    groups_l1b = defaultdict(list)
+    files = os.listdir(inp_directory)
+
+    for file in files:
+        #print(f"{file}")
+        match_l1b = pattern_l1b.match(file)
+
+        if match_l1b:
+            prefix = match_l1b.group(1)
+            #lpp    = match.group(2)
+            version = match_l1b.group(3)
+            key = f"{prefix}_{version}"
+            #print(f"{prefix}_{version}")
+            groups_l1b[key].append(file)
+
+    return groups_l1b
+
+def get_l1c_listing(inp_directory:str):
+    pattern_l1c = re.compile(r"^(3RIMG_\d{2}[A-Za-z]{3}\d{4}_\d{4}_L\d{1}[A-Za-z]{1})_([^_]+)_([^_]+_[^_]+)_(V\d{2}R\d{2})\.tif$")
+    groups_l1c = defaultdict(list)
+    files = os.listdir(inp_directory)
+
+    for file in files:
+        match_l1c = pattern_l1c.match(file)
+        #print(f"{file} {match_l1c}")
+        if match_l1c:
+            prefix = match_l1c.group(1)
+            sector    = match_l1c.group(2)
+            version = match_l1c.group(4)
+            key = f"{prefix}_{sector}_{version}"
+            groups_l1c[key].append(file)
+
+
+    return groups_l1c
+
+class EventHandler(FileSystemEventHandler):
+
+    Months       = {'JAN':'01','FEB':'02','MAR':'03','APR':'04','MAY':'05','JUN':'06','JUL':'07','AUG':'08','SEP':'09','OCT':'10','NOV':'11','DEC':'12'}
+
+    def __init__(self,outputdir,product_code,lpp_code,sat_code,merge_scripts):
+        self.outputdir = outputdir
+        self.product_code = product_code
+        self.lpp_code = lpp_code
+        self.sat_code = sat_code
+        self.merge_script = merge_scripts
+
+    def parse_insat_filename(self,fl):
+        pattern = r'^([^_]+){1}'
+        satsen = re.search(pattern,fl)
+        pattern = r"_(\d{2})([A-Za-z]{3})(\d{4})_"
+        date = re.search(pattern,fl)
+        #print(f"{satsen} {date}")
+        return date,satsen
+
+    def create_directory(self,filename,scode):
+        print(f"dummy")
+        #return dirpath,tfilename
+
+    def create_cog(self,input_gtif:str,output_cog:str):
+
+        gdal.Translate(output_cog,input_gtif,format="COG",options=["COMPRESS=LZW","BIGTIFF=IF_SAFER"])
+
+
+    def resample_and_merge(self,input_files:list,output_file:str):
+
+        src = gdal.Open(input_files[2],gdal.GA_ReadOnly)
+        cols = src.RasterXSize
+        rows = src.RasterYSize
+        geotransform = src.GetGeoTransform()
+        projection = src.GetProjection()
+
+
+        driver = gdal.GetDriverByName('GTiff')
+        outputs = driver.Create(output_file,cols,rows,len(input_files),gdal.GDT_UInt16)
+        outputs.SetGeoTransform(geotransform)
+        outputs.SetProjection(projection)
+
+
+        for idx,file in enumerate(input_files):
+            src_ds = gdal.Open(file,gdal.GA_ReadOnly)
+            xcols = src_ds.RasterXSize
+            yrows = src_ds.RasterYSize
+
+            if cols != xcols or rows != yrows:
+                dst_ds = gdal.GetDriverByName('MEM').Create("",cols,rows,1,gdal.GDT_UInt16)
+                dst_ds.SetGeoTransform(geotransform)
+                dst_ds.SetProjection(projection)
+                gdal.ReprojectImage(src_ds, dst_ds)
+                metadata = src_ds.GetRasterBand(1).GetMetadata()
+                nodata_value = src_ds.GetRasterBand(1).GetNoDataValue()
+
+                band = dst_ds.GetRasterBand(1).ReadAsArray()
+                if 'IMG_VIS' in file or 'IMG_SWIR' in file:
+                    band[band == 0] = 1023
+                b1 = outputs.GetRasterBand(idx+1)
+                b1.SetMetadata(metadata)
+                b1.SetStatistics(np.float64(metadata['MIN']),np.float64(metadata['MAX']),np.float64(metadata['MEAN']),np.float64(metadata['STD_DEV'])) 
+                b1.SetNoDataValue(nodata_value)
+                b1.WriteArray(band)
+                src_ds = None
+                ouputs = None
+                dst_ds = None
+            else:
+                metadata = src_ds.GetRasterBand(1).GetMetadata()
+                nodata_value = src_ds.GetRasterBand(1).GetNoDataValue()
+
+                band = src_ds.GetRasterBand(1).ReadAsArray()
+                if 'IMG_VIS' in file or 'IMG_SWIR' in file:
+                    band[band == 0] = 1023
+                b1 = outputs.GetRasterBand(idx+1)
+                b1.SetMetadata(metadata)
+                b1.SetStatistics(np.float64(metadata['MIN']),np.float64(metadata['MAX']),np.float64(metadata['MEAN']),np.float64(metadata['STD_DEV'])) 
+                b1.SetNoDataValue(nodata_value)
+                b1.WriteArray(band)
+                src_ds = None
+        ouputs = None
+
+    def get_band_stats(band,fill_value=None):
+
+        if fill_value is not None:
+            mask = np.isin(band,fill_value)
+            valid_values = band[~mask]
+        else:
+            valid_values = band[~np.isnan(band)]
+
+        min_val = np.min(valid_values)
+        max_val = np.max(valid_values)
+        mean_val = np.mean(valid_values)
+        std_dev = np.std(valid_values)
+        mode_val = statistics.mode(valid_values.flatten())
+        metadata = {"MIN": str(min_val),"MAX": str(max_val),"MEAN": str(mean_val),"STD_DEV":str(std_dev),"MODE":str(mode_val)}
+        return metadata
+
+
+    def on_created(self, event):
+        predict_seq = ['IMG_VIS','IMG_SWIR','IMG_TIR1','IMG_TIR2','IMG_MIR','IMG_WV']
+        print(f"on_created: {str(event.src_path)}")
+        fl_basename = os.path.basename(str(event.src_path))
+        fl, ext = os.path.splitext(fl_basename)
+
+        if ext != '.tif' or '.cog' in fl:
+            return
+
+        last_size = -1
+        while True:
+            csize = os.path.getsize(str(event.src_path))
+            if csize == last_size:
+                break;
+            last_size = csize
+            time.sleep(2)
+        
+        if '_L1B_' in fl:
+            #print(f"Eureka")
+            mtch,satsen = self.parse_insat_filename(fl)
+            directory = os.path.join(self.outputdir,satsen.group(1),mtch.group(3),self.Months[mtch.group(2)],mtch.group(1))
+            groups_l1b = get_l1b_listing(directory)
+            for key,group in groups_l1b.items():
+                if (len(group)) == 6 and 'IMG_WV' in fl :
+                    abs_file = [os.path.join(directory,file) for file in group]
+                    abs_file = rearrange = sorted(abs_file, key = lambda x: predict_seq.index(next(filter(lambda y: y in x, predict_seq),' ')))
+                    merge_gtif_file = f"{directory}{os.sep}{key}.tif"
+                    cog_gtif_file = f"{directory}{os.sep}{key}.cog.tif"
+                    merge_cmd = f'python {self.merge_script} -separate -o {merge_gtif_file} {" ".join(abs_file)}'
+                    self.resample_and_merge(abs_file,merge_gtif_file)
+                    self.create_cog(merge_gtif_file,cog_gtif_file)
+
+                
+        elif '_L1C_' in fl:
+            mtch,satsen = self.parse_insat_filename(fl)
+            directory = os.path.join(self.outputdir,satsen.group(1),mtch.group(3),self.Months[mtch.group(2)],mtch.group(1))
+            groups_l1c = get_l1c_listing(directory)
+            for key,group in groups_l1c.items():
+                if (len(group)) == 6 and 'IMG_WV' in fl:
+                    abs_file = [os.path.join(directory,file) for file in group]
+                    abs_file = rearrange = sorted(abs_file, key = lambda x: predict_seq.index(next(filter(lambda y: y in x, predict_seq),' ')))
+                    merge_gtif_file = f"{directory}{os.sep}{key}.tif"
+                    cog_gtif_file = f"{directory}{os.sep}{key}.cog.tif"
+                    merge_cmd = f'python {self.merge_script} -separate -o {merge_gtif_file} {" ".join(abs_file)}'
+                    self.resample_and_merge(abs_file,merge_gtif_file)
+                    self.create_cog(merge_gtif_file,cog_gtif_file)
+
+        elif '_L2C_' in fl or '_L2B_' in fl or '_L3C_' in fl or '_L3B_' in fl:
+            input_filename = str(event.src_path)
+            flname,ext = os.path.splitext(input_filename)
+            cog_gtif_file = '%s.cog%s'%(flname,ext)
+            self.create_cog(input_filename,cog_gtif_file)
+
+
+
+    #def on_moved(self, event):
+
+    #    fl_basename = os.path.basename(str(event.src_path))
+    #    fl, ext = os.path.splitext(fl_basename)
+    #    datasets = self.getdatasetlist(str(event.src_path))
+
+
+
+def main():
+
+    if (len(sys.argv) < 2):
+        print(f"Usage {sys.argv[0]} <config.ini>")
+        sys.exit(1)
+
+    config = configparser.ConfigParser()
+    config.read(sys.argv[1])
+
+    watch_dirs = config['COG_GENERATION']['WATCH_DIR'].split(',')  # All but the last argument are input directories
+    output_dir = config['COG_GENERATION']['OUTPUT_DIR']  # The last argument is the output directory
+    sat_codes  = config['COG_GENERATION']['SAT_CODES'].split(',')
+    lpp_codes   = config['COG_GENERATION']['LPP_CODES'].split(',')
+    product_codes = config['COG_GENERATION']['PRODUCT_CODES'].split(',')
+    merge_scripts = config['COG_GENERATION']['MERGE_GTIF']
+    logs_dir = config['COG_GENERATION']['LOGS']
+
+    event_handler = EventHandler(output_dir,product_codes,lpp_codes,sat_codes,merge_scripts)
+    observer = PollingObserver()
+    #for watch_dir in output_dir:
+    observer.schedule(event_handler, output_dir, recursive=True)
+    observer.start()
+    print(f"Monitoring of  {output_dir} started")
+    try:
+        while True:
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        observer.stop()
+        observer.join()
+
+main()
