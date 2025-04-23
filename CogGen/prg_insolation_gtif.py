@@ -84,47 +84,102 @@ class EventHandler(FileSystemEventHandler):
 
     def on_created(self, event):
         print(f"on_created: {str(event.src_path)}")
+        write_log('COGGEN', f"Processing new file: {str(event.src_path)}", 'INFO')
         fl_basename = os.path.basename(str(event.src_path))
         fl, ext = os.path.splitext(fl_basename)
 
         if ext != '.h5':
+            write_log('COGGEN', f"Skipping non-h5 file: {fl_basename}", 'INFO')
             return
-      
+        
+        write_log('COGGEN', f"Detected h5 file: {fl_basename}", 'INFO')
+        
+        # Wait for file to be fully written
         last_size = -1
+        wait_attempts = 0
+        write_log('COGGEN', f"Waiting for file stability: {fl_basename}", 'INFO')
+        
         while True:
-            csize = os.path.getsize(str(event.src_path))
-            if csize == last_size:
-                break;
-            last_size = csize
-            time.sleep(2)
+            try:
+                csize = os.path.getsize(str(event.src_path))
+                write_log('COGGEN', f"Current file size: {csize} bytes", 'DEBUG')
+                
+                if csize == last_size:
+                    write_log('COGGEN', f"File size stabilized at {csize} bytes after {wait_attempts} attempts", 'INFO')
+                    break
+                    
+                last_size = csize
+                wait_attempts += 1
+                time.sleep(2)
+            except Exception as e:
+                write_log('COGGEN', f"Error checking file size: {str(e)}", 'ERROR')
+                return
 
+        # Get datasets from the file
+        write_log('COGGEN', f"Getting datasets for file: {fl_basename}", 'INFO')
         datasets = self.getdatasetlist(str(event.src_path))
+        write_log('COGGEN', f"Found datasets: {datasets}", 'INFO')
+        write_log('COGGEN', f"Looking for product codes {self.product_code} in datasets {datasets}", 'INFO')
 
-        if len(datasets)== 0:
+        if len(datasets) == 0:
+            write_log('COGGEN', f"No datasets found in file: {fl_basename}", 'WARNING')
             return
-        plevel   = self.getprocessinglevel(str(event.src_path))
+            
+        plevel = self.getprocessinglevel(str(event.src_path))
+        write_log('COGGEN', f"Processing level identified: {plevel}", 'INFO')
+        
+        # Process each product code
+        products_processed = 0
         
         for code in self.product_code:
-            if code in datasets: 
-                dirpath,tfilename = self.create_directory(fl,code)
-                tfl = os.path.join(dirpath,tfilename)
-                #if code == 'HEM_DLY' or code == 'LST':
-                if plevel in ['L1B','L2B','L3B']:
-                    write_log('COGGEN',f"Watchdog received moved event - {event.src_path}", level='INFO')
-                    create_geotif(str(event.src_path),code,tfl)
-                    write_log('COGGEN',f'Successfully written: {tfl}','INFO')
-                #elif code == 'AOD':
-                elif plevel in ['L2G','L3G']:
-                    write_log('COGGEN',f"Watchdog received moved event - {event.src_path}", level='INFO')
-                    create_gridded_geotif(str(event.src_path),code,tfl)
-                    write_log('COGGEN',f'Successfully written: {tfl}','INFO')
-                else:
-                    #dirpath,tfilename = self.create_directory(fl,code)
-                    #tfl = os.path.join(dirpath,tfilename)
-                    write_log('COGGEN',f"Watchdog received moved event - {event.src_path}", level='INFO')
-                    write_toa_geotiff(str(event.src_path),code,tfl)
-                    write_log('COGGEN',f'Successfully written: {tfl}','INFO')
-			
+            if code in datasets:
+                write_log('COGGEN', f"Processing product code {code} in file: {fl_basename}", 'INFO')
+                dirpath, tfilename = self.create_directory(fl, code)
+                write_log('COGGEN', f"Target directory: {dirpath}", 'INFO')
+                write_log('COGGEN', f"Target filename: {tfilename}", 'INFO')
+                
+                tfl = os.path.join(dirpath, tfilename)
+                
+                try:
+                    # Process based on processing level
+                    if plevel in ['L1B', 'L2B', 'L3B']:
+                        write_log('COGGEN', f"Using create_geotif for {plevel} file: {fl_basename}, product: {code}", 'INFO')
+                        create_geotif(str(event.src_path), code, tfl)
+                        write_log('COGGEN', f'Successfully written: {tfl}', 'INFO')
+                        products_processed += 1
+                    elif plevel in ['L2G', 'L3G']:
+                        write_log('COGGEN', f"Using create_gridded_geotif for {plevel} file: {fl_basename}, product: {code}", 'INFO')
+                        create_gridded_geotif(str(event.src_path), code, tfl)
+                        write_log('COGGEN', f'Successfully written: {tfl}', 'INFO')
+                        products_processed += 1
+                    else:
+                        # This should handle L1C, L2C, L3C
+                        write_log('COGGEN', f"Using write_toa_geotiff for {plevel} file: {fl_basename}, product: {code}", 'INFO')
+                        write_toa_geotiff(str(event.src_path), code, tfl)
+                        write_log('COGGEN', f'Successfully written: {tfl}', 'INFO')
+                        products_processed += 1
+                        
+                    # Check if COG conversion is needed for tfl
+                    if os.path.exists(tfl):
+                        # Comment out the COG creation in prg_insolation_gtif.py
+                        # cog_filename = f"{tfl}.cog.tif"
+                        # write_log('COGGEN', f"Creating COG file: {cog_filename}", 'INFO')
+                        # create_cog(tfl, cog_filename)
+                        # write_log('COGGEN', f"Successfully created COG file: {cog_filename}", 'INFO')
+                        
+                        # No need to remove original file since we're not creating COGs here
+                        pass
+                    else:
+                        write_log('COGGEN', f"Output file not found for COG conversion: {tfl}", 'WARNING')
+                        
+                except Exception as e:
+                    write_log('COGGEN', f"Error processing product {code} in file {fl_basename}: {str(e)}", 'ERROR')
+                    print(f"Error processing product {code}: {str(e)}")
+        
+        write_log('COGGEN', f"Completed processing file {fl_basename}, {products_processed} products processed", 'INFO')
+        if products_processed == 0:
+            write_log('COGGEN', f"WARNING: No products were processed for file {fl_basename}", 'WARNING')
+
     def on_moved(self, event):
 
         fl_basename = os.path.basename(str(event.src_path))
@@ -397,8 +452,8 @@ def create_geotif(hdf_filename,dataset,geotiff_filename):
     ws = None
     file.close()
     os.remove(inter_gtif)
-    cog_filename=f"{geotiff_filename}.cog.tif"
-   # create_cog(geotiff_filename,cog_filename)
+    # cog_filename=f"{geotiff_filename}.cog.tif"
+    # create_cog(geotiff_filename,cog_filename)
 
 
 def create_gridded_geotif(hdf_filename,dataset,geotiff_filename):
@@ -471,3 +526,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+ 
