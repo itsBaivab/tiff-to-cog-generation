@@ -268,7 +268,8 @@ class EventHandler(FileSystemEventHandler):
         fl_basename = os.path.basename(str(event.src_path))
         fl, ext = os.path.splitext(fl_basename)
 
-        if ext != '.tif' or '.cog' in fl:
+        # Fix the check for COG files - properly exclude files with .cog in their name
+        if ext != '.tif' or '.cog' in fl_basename:
             return
         
         # Check if file exists before trying to access it
@@ -332,7 +333,23 @@ class EventHandler(FileSystemEventHandler):
                         # Remove the original multiband file
                         os.remove(merge_gtif_file)
 
-            elif '_L2C_' in fl or '_L2B_' in fl or '_L3C_' in fl or '_L3B_' in fl:
+            # Modified logic for L2C files - convert ALL L2C files to COG regardless of content
+            elif '_L2C_' in fl:
+                input_filename = str(event.src_path)
+                flname, ext = os.path.splitext(input_filename)
+                cog_gtif_file = f"{flname}.cog{ext}"
+                self.create_cog(input_filename, cog_gtif_file)
+                print(f"Created COG for L2C file: {input_filename}")
+                
+                # Remove original file after successful conversion
+                if os.path.exists(cog_gtif_file) and os.path.getsize(cog_gtif_file) > 0:
+                    os.remove(input_filename)
+                    print(f"Removed original file after COG conversion: {fl_basename}")
+                else:
+                    print(f"COG conversion may have failed, original file not removed: {fl_basename}")
+                
+            # Keep original logic for other LPP codes
+            elif '_L2B_' in fl or '_L3C_' in fl or '_L3B_' in fl:
                 input_filename = str(event.src_path)
                 
                 # Only create COG for VIS/SWIR files
@@ -346,7 +363,7 @@ class EventHandler(FileSystemEventHandler):
 
         except Exception as e:
             print(f"Error processing file {event.src_path}: {str(e)}")
-            # You might want to log this error more formally
+            write_log('COGGEN', f"Error processing file {fl_basename}: {str(e)}", 'ERROR')
 
     #def on_moved(self, event):
 
