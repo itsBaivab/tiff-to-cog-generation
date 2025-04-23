@@ -125,27 +125,81 @@ class TiffHandler(FileSystemEventHandler):
         version = r'V(\d{2})'
         revision = r'R(\d{2})'
 
+        # Define all valid product codes
+        PRODUCT_CODES = [
+            'UTH', 'OLR', 
+            'CMK', 'HEM', 'LST', 'SST', 'IMC', 'DHI', 'DNI', 'GHI', 'INS', 'FOG', 'CMP', 'IMR', 
+            'AOD', 'GPI', 'PET_DLY', 'GHI_DLY', 'DNI_DLY', 'DHI_DLY', 'INS_DLY', 'HEM_DLY', 
+            'LST_MAX_DLY', 'LST_MIN_DLY', 'UTH_DLY', 'OLR_DLY', 'SST_DLY', 'IMC_DLY', 'SWR_DLY', 
+            'IMG_TIR1_TEMP', 'IMG_TIR2_TEMP', 'IMG_MIR_TEMP', 'IMG_WV_TEMP', 'IMG_VIS_RADIANCE', 
+            'IMG_SWIR_RADIANCE', 'IMG_TIR1_RADIANCE', 'IMG_TIR2_RADIANCE', 'IMG_MIR_RADIANCE', 
+            'IMG_WV_RADIANCE', 'SNW','SGP','ASIA_MER',
+        ]
+
         print(os.path.basename(filepath))
         print(os.path.basename(filepath).split("_")[-1])
         try:
             with rasterio.open(filepath)as src:
                 # Determine image type based on filename and band count
                 filename = os.path.basename(filepath)
+                filename_parts = filename.split("_")
                 
-                # If multiple bands are present, always use "MULTI"
-                if src.count > 1:
+                # Extract product code for L2B and L2C files
+                image_type = "UNKNOWN"  # Default value
+                
+                # Check for L2C pattern (e.g., 3RIMG_17APR2025_0045_L2C_INS_V01R00)
+                if "_L2C_" in filename:
+                    # Find the part after L2C
+                    for i, part in enumerate(filename_parts):
+                        if part == "L2C" and i+1 < len(filename_parts):
+                            image_type = filename_parts[i+1]  # Get product code (INS, CMP, etc.)
+                            break
+                
+                # Check for L2B pattern (e.g., 3RIMG_L2B_IMC)
+                elif "_L2B_" in filename:
+                    # Find the part after L2B
+                    for i, part in enumerate(filename_parts):
+                        if part == "L2B" and i+1 < len(filename_parts):
+                            image_type = filename_parts[i+1]  # Get product code (IMC, etc.)
+                            break
+                
+                # If not L2B/L2C or couldn't extract product code, use the existing logic
+                elif src.count > 1:
                     image_type = "MULTI"
                 else:
-                    # For single band images, try to determine the specific band type from filename
-                    image_type = "UNKNOWN"  # Default if band type can't be determined
-                    
-                    # Check if IMG appears in the filename segments
-                    filename_parts = filename.split("_")
+                    # For single band images that aren't L2B/L2C, use existing logic
                     if "IMG" in filename_parts:
                         # Find the band type that comes after IMG
                         img_index = filename_parts.index("IMG")
                         if img_index < len(filename_parts) - 1:
                             image_type = filename_parts[img_index + 1]  # Get band type (VIS, SWIR, TIR2, etc.)
+                
+                # Find any product code in the filename
+                product_code = "NONE"
+
+                # First check for codes in L2C and L2B files (most specific)
+                if "_L2C_" in filename or "_L2B_" in filename:
+                    # Use the already extracted image_type if it's not UNKNOWN
+                    if image_type != "UNKNOWN":
+                        product_code = image_type
+                else:
+                    # For other file types, check for each product code in the list
+                    for code in PRODUCT_CODES:
+                        # Extract exact matches - look for code surrounded by underscores or at the end of filename
+                        pattern = f"_{code}_|_{code}\\.|^{code}_"
+                        if re.search(pattern, filename):
+                            product_code = code
+                            break
+
+                # If still NONE, try one more method - check if any code appears anywhere
+                if product_code == "NONE":
+                    for code in PRODUCT_CODES:
+                        if code in filename:
+                            product_code = code
+                            break
+
+                # Add debugging
+                print(f"Extracted product_code: {product_code} for file: {filename}")
                 
                 bands_info = []
                 for band_idx in range(1, src.count+1):
@@ -189,7 +243,8 @@ class TiffHandler(FileSystemEventHandler):
                     "productId": os.path.basename(filepath).split(".")[0],
                     "filepath": os.path.dirname(filepath),
                     "aquisition_datetime": extractTimeStamp(os.path.basename(filepath)),
-                    "type": image_type,  # Add the image type field
+                    "type": image_type,  # The image type field
+                    "product_code": product_code,  # New field for product code
                     "coverage": {
                         "lat1": float(src.bounds.bottom),
                         "lat2": float(src.bounds.top),
