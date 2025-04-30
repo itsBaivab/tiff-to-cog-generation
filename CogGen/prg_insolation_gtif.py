@@ -147,7 +147,7 @@ class EventHandler(FileSystemEventHandler):
                         create_geotif(str(event.src_path), code, tfl)
                         write_log('COGGEN', f'Successfully written: {tfl}', 'INFO')
                         products_processed += 1
-                    elif plevel in ['L2G', 'L3G']:
+                    elif plevel in ['L2G', 'L3G','L2P']:
                         write_log('COGGEN', f"Using create_gridded_geotif for {plevel} file: {fl_basename}, product: {code}", 'INFO')
                         create_gridded_geotif(str(event.src_path), code, tfl)
                         write_log('COGGEN', f'Successfully written: {tfl}', 'INFO')
