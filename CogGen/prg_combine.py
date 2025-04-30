@@ -23,11 +23,15 @@ osr.UseExceptions()
 
 logs_dir = '/usr/local/logs/CogGen'
 
-def write_log(rule,message,level='INFO'):
+def write_log(rule, message, level='INFO'):
     log_file_name = get_dynamic_log_file_name(rule)
+    
+    # Create logs directory if it doesn't exist
+    os.makedirs(os.path.dirname(log_file_name), exist_ok=True)
+    
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     log_entry = f'{timestamp} - {level} - {rule} - {message}\n'
-    with open(log_file_name,'a') as log_file:
+    with open(log_file_name, 'a') as log_file:
         log_file.write(log_entry)
     log_file.close()
 
@@ -135,7 +139,7 @@ class EventHandler(FileSystemEventHandler):
         
         src_ds = None
 
-    def resample_and_merge(self,input_files:list,output_file:str):
+    def resample_and_merge(self, input_files:list, output_file:str, filename:str=None):
         predict_seq = ['IMG_VIS','IMG_SWIR','IMG_TIR1','IMG_TIR2','IMG_MIR','IMG_WV','VIS_RADIANCE','SWIR_RADIANCE','TIR1_RADIANCE','TIR2_RADIANCE','MIR_RADIANCE','WV_RADIANCE','TIR1_TEMP','TIR2_TEMP','MIR_TEMP','WV_TEMP']
 
         print("Merging Process Started") 
@@ -171,10 +175,18 @@ class EventHandler(FileSystemEventHandler):
                 band = dst_ds.GetRasterBand(1).ReadAsArray()
                 print(f"source nodata value: {nodata_value}")
                 band[band == 0] = target_nodata
+                
+                # NEW: Recalculate metadata after NoData replacement
+                recalculated_metadata = self.get_band_stats(band, target_nodata)
 
                 b1 = outputs.GetRasterBand(idx+1)
-                b1.SetMetadata(metadata)
-                b1.SetStatistics(np.float64(metadata['MIN']),np.float64(metadata['MAX']),np.float64(metadata['MEAN']),np.float64(metadata['STD_DEV'])) 
+                b1.SetMetadata(recalculated_metadata)  # Use recalculated_metadata
+                b1.SetStatistics(
+                    np.float64(recalculated_metadata['MIN']),
+                    np.float64(recalculated_metadata['MAX']), 
+                    np.float64(recalculated_metadata['MEAN']), 
+                    np.float64(recalculated_metadata['STD_DEV'])
+                )
                 b1.SetNoDataValue(target_nodata)
                 b1.WriteArray(band)
                 b1.SetDescription(predict_seq[idx])
@@ -186,23 +198,32 @@ class EventHandler(FileSystemEventHandler):
                 nodata_value = src_ds.GetRasterBand(1).GetNoDataValue()
 
                 band = src_ds.GetRasterBand(1).ReadAsArray()
-                band= band.astype(np.float32)
+                band = band.astype(np.float32)
                 band[band == nodata_value] = target_nodata
+
+                # Recalculate metadata after NoData replacement
+                recalculated_metadata = self.get_band_stats(band, target_nodata)
+
                 b1 = outputs.GetRasterBand(idx+1)
-                b1.SetMetadata(metadata)
-                b1.SetStatistics(np.float64(metadata['MIN']),np.float64(metadata['MAX']),np.float64(metadata['MEAN']),np.float64(metadata['STD_DEV'])) 
+                b1.SetMetadata(recalculated_metadata)
+                b1.SetStatistics(
+                    np.float64(recalculated_metadata['MIN']),
+                    np.float64(recalculated_metadata['MAX']), 
+                    np.float64(recalculated_metadata['MEAN']), 
+                    np.float64(recalculated_metadata['STD_DEV'])
+                ) 
                 b1.SetNoDataValue(target_nodata)
                 b1.WriteArray(band)
                 b1.SetDescription(predict_seq[idx])
                 src_ds = None
             
-            # Only create COG files for VIS/SWIR files
-            if 'IMG_VIS' in file or 'IMG_SWIR' in file:
+            # Only create COG files for VIS/SWIR files when processing L1B data
+            if ('IMG_VIS' in file or 'IMG_SWIR' in file) and filename and '_L1B_' in filename:
                 cog_gtif_file = f"{os.path.splitext(file)[0]}.cog.tif"
                 self.create_cog(file, cog_gtif_file)
                 print(f"Created COG for VIS/SWIR file: {file}")
             else:
-                print(f"Skipping COG creation for non-VIS/SWIR file: {file}")
+                print(f"Skipping COG creation for file: {file}")
                 
             # Remove original file in all cases
             os.remove(file)
@@ -213,20 +234,33 @@ class EventHandler(FileSystemEventHandler):
         outputs = None
         print("Merging Process Completed")
 
-    def get_band_stats(band,fill_value=None):
-
+    def get_band_stats(self, band, fill_value=None):
         if fill_value is not None:
-            mask = np.isin(band,fill_value)
+            # Create mask for all values that equal the fill_value
+            mask = band == fill_value
+            # Get only valid values (non-fill values)
             valid_values = band[~mask]
         else:
             valid_values = band[~np.isnan(band)]
+
+        # If there are no valid values, return zeros to avoid errors
+        if len(valid_values) == 0:
+            return {"MIN": "0", "MAX": "0", "MEAN": "0", "STD_DEV": "0", "MODE": "0"}
 
         min_val = np.min(valid_values)
         max_val = np.max(valid_values)
         mean_val = np.mean(valid_values)
         std_dev = np.std(valid_values)
-        mode_val = statistics.mode(valid_values.flatten())
-        metadata = {"MIN": str(min_val),"MAX": str(max_val),"MEAN": str(mean_val),"STD_DEV":str(std_dev),"MODE":str(mode_val)}
+        
+        # Handle mode calculation more carefully
+        try:
+            mode_val = statistics.mode(valid_values.flatten())
+        except statistics.StatisticsError:
+            # If no unique mode, use mean
+            mode_val = mean_val
+            
+        metadata = {"MIN": str(min_val), "MAX": str(max_val), "MEAN": str(mean_val), 
+                    "STD_DEV": str(std_dev), "MODE": str(mode_val)}
         return metadata
 
     def wait_for_file_stability(self, filepath, timeout=30, check_interval=0.5):
@@ -234,7 +268,6 @@ class EventHandler(FileSystemEventHandler):
         start_time = time.time()
         last_size = -1
         stable_count = 0
-        
         print(f"Waiting for file to stabilize: {filepath}")
         
         while time.time() - start_time < timeout:
@@ -251,7 +284,7 @@ class EventHandler(FileSystemEventHandler):
                 else:
                     # Reset stable count if size changed
                     stable_count = 0
-                    
+                
                 last_size = current_size
                 time.sleep(check_interval)
                 
@@ -267,22 +300,22 @@ class EventHandler(FileSystemEventHandler):
         print(f"on_created: {str(event.src_path)}")
         fl_basename = os.path.basename(str(event.src_path))
         fl, ext = os.path.splitext(fl_basename)
-
+        
+        # Fix: Change filepath to event.src_path
+        print(f"Processing file: {event.src_path}")
+        
         # Fix the check for COG files - properly exclude files with .cog in their name
         if ext != '.tif' or '.cog' in fl_basename:
             return
-        
         # Check if file exists before trying to access it
         if not os.path.exists(event.src_path):
             print(f"File not found immediately after creation event: {event.src_path}")
             return
-            
         try:
             # Wait for file stability
             if not self.wait_for_file_stability(event.src_path, timeout=60, check_interval=1):
                 print(f"File may not be completely written: {event.src_path}")
                 return
-                
             # Now it's safe to continue with processing
             if '_L1B_' in fl:
                 mtch,satsen = self.parse_insat_filename(fl)
@@ -295,26 +328,22 @@ class EventHandler(FileSystemEventHandler):
                         abs_file = rearrange = sorted(abs_file, key = lambda x: predict_seq.index(next(filter(lambda y: y in x, predict_seq),' ')))
                         merge_gtif_file = f"{directory}{os.sep}{key}.tif"
                         cog_gtif_file = f"{directory}{os.sep}{key}.cog.tif"
-                        
                         # Process the merge - this will create individual COGs for VIS/SWIR
                         # and will create a multiband file
-                        self.resample_and_merge(abs_file, merge_gtif_file)
-                        
+                        self.resample_and_merge(abs_file, merge_gtif_file, fl)
+
                         # Create COG for the multiband file
                         self.create_cog(merge_gtif_file, cog_gtif_file)
                         print(f"Created COG for multiband file: {merge_gtif_file}")
                         # Remove the original multiband file
                         os.remove(merge_gtif_file)
-                    
             elif '_L1C_' in fl:
                 mtch,satsen = self.parse_insat_filename(fl)
                 directory = os.path.join(self.outputdir,satsen.group(1),mtch.group(3),self.Months[mtch.group(2)],mtch.group(1))
-
                 if 'ASIA_MER' in fl:
                     groups_l1c = get_l1c_asia_listing(directory)
                 else:
                     groups_l1c = get_l1c_listing(directory)
-
                 for key,group in groups_l1c.items():
                     if (len(group)) == 16 and 'WV_RADIANCE' in fl:
                         # This is a multiband file processing
@@ -322,56 +351,46 @@ class EventHandler(FileSystemEventHandler):
                         abs_file = rearrange = sorted(abs_file, key = lambda x: predict_seq.index(next(filter(lambda y: y in x, predict_seq),' ')))
                         merge_gtif_file = f"{directory}{os.sep}{key}.tif"
                         cog_gtif_file = f"{directory}{os.sep}{key}.cog.tif"
-                        
                         # Process the merge - this will create individual COGs for VIS/SWIR
                         # and will create a multiband file
-                        self.resample_and_merge(abs_file, merge_gtif_file)
-                        
+                        self.resample_and_merge(abs_file, merge_gtif_file, fl)
+
                         # Create COG for the multiband file
                         self.create_cog(merge_gtif_file, cog_gtif_file)
                         print(f"Created COG for multiband file: {merge_gtif_file}")
                         # Remove the original multiband file
                         os.remove(merge_gtif_file)
-
             # Modified logic for L2C files - convert ALL L2C files to COG regardless of content
-            elif '_L2C_' in fl:
+            elif '_L2C_'  or '_L2B_'  or '_L3C_' or '_L3B_' or 'L2G' or 'L2P'in fl:
                 input_filename = str(event.src_path)
                 flname, ext = os.path.splitext(input_filename)
                 cog_gtif_file = f"{flname}.cog{ext}"
                 self.create_cog(input_filename, cog_gtif_file)
-                print(f"Created COG for L2C file: {input_filename}")
+                if 'L2C' in cog_gtif_file:
+                    print(f"Created COG for L2C file: {input_filename}")
+                if 'L2B' in cog_gtif_file:
+                    print(f"Created COG for L2B file: {input_filename}")
+                if 'L3C' in cog_gtif_file:
+                    print(f"Created COG for L3C file: {input_filename}")
+                if 'L2B' in cog_gtif_file:
+                    print(f"Created COG for L2B file: {input_filename}")
+                if 'L3B' in cog_gtif_file:
+                    print(f"Created COG for L3B file: {input_filename}")
+                if 'L2G' in cog_gtif_file:
+                    print(f"Created COG for L2G file: {input_filename}")
+                if 'L2P' in cog_gtif_file:
+                    print(f"Created COG for L2P file: {input_filename}")    
                 
-                # Remove original file after successful conversion
-                if os.path.exists(cog_gtif_file) and os.path.getsize(cog_gtif_file) > 0:
-                    os.remove(input_filename)
-                    print(f"Removed original file after COG conversion: {fl_basename}")
-                else:
-                    print(f"COG conversion may have failed, original file not removed: {fl_basename}")
-                
-            # Keep original logic for other LPP codes
-            elif '_L2B_' in fl or '_L3C_' in fl or '_L3B_' in fl:
-                input_filename = str(event.src_path)
-                
-                # Only create COG for VIS/SWIR files
-                if 'IMG_VIS' in fl or 'IMG_SWIR' in fl or 'VIS_RADIANCE' in fl or 'SWIR_RADIANCE' in fl:
-                    flname, ext = os.path.splitext(input_filename)
-                    cog_gtif_file = f"{flname}.cog{ext}"
-                    self.create_cog(input_filename, cog_gtif_file)
-                    print(f"Created COG for VIS/SWIR file: {input_filename}")
-                else:
-                    print(f"Skipping COG creation for non-VIS/SWIR file: {input_filename}")
-
+                # Remove original file after successful conversion to COG regardless of content
+                # if os.path.exists(cog_gtif_file) and os.path.getsize(cog_gtif_file) > 0:
+                    # os.remove(input_filename)
+                    # print(f"Removed original file after COG conversion: {fl_basename}")
+                # else:
+                    # print(f"COG conversion may have failed, original file not removed: {fl_basename}")
+            
         except Exception as e:
             print(f"Error processing file {event.src_path}: {str(e)}")
             write_log('COGGEN', f"Error processing file {fl_basename}: {str(e)}", 'ERROR')
-
-    #def on_moved(self, event):
-
-    #    fl_basename = os.path.basename(str(event.src_path))
-    #    fl, ext = os.path.splitext(fl_basename)
-    #    datasets = self.getdatasetlist(str(event.src_path))
-
-
 
 def main():
 
@@ -381,7 +400,6 @@ def main():
 
     config = configparser.ConfigParser()
     config.read(sys.argv[1])
-
     watch_dirs = config['COG_GENERATION']['WATCH_DIR'].split(',')  # All but the last argument are input directories
     output_dir = config['COG_GENERATION']['OUTPUT_DIR']  # The last argument is the output directory
     sat_codes  = config['COG_GENERATION']['SAT_CODES'].split(',')
@@ -392,7 +410,6 @@ def main():
 
     event_handler = EventHandler(output_dir,product_codes,lpp_codes,sat_codes,merge_scripts)
     observer = PollingObserver()
-    #for watch_dir in output_dir:
     observer.schedule(event_handler, output_dir, recursive=True)
     observer.start()
     print(f"Monitoring of  {output_dir} started")
