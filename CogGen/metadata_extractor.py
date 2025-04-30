@@ -4,17 +4,14 @@ import logging
 import os
 import rasterio
 import requests
+import numpy as np
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers.polling import PollingObserver
-
 from watchdog.observers import Observer
 from pathlib import Path
 import re
 
-
-# logger = setup_logging()   # initializing the logger
-
-
+# Configure logging
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s-%(levelname)s-%(message)s')
 logger = logging.getLogger(__name__)
@@ -28,7 +25,7 @@ def extractTimeStamp(filepath):
         month = datetime.strptime(month_str, "%b").month
         return f"{day.zfill(2)}{str(month).zfill(2)}{year}{time}"
     except Exception as e:
-        logger.error(f"Error getting metadata from file :{str(e)}")
+        logger.error(f"Error getting metadata from file: {str(e)}")
         raise
 
 
@@ -79,7 +76,7 @@ class TiffHandler(FileSystemEventHandler):
                 
             # Get absolute path
             abs_path = os.path.abspath(event.src_path)
-            logger.info(f"New TIFF file detected: {abs_path}")
+            logger.info(f"New COG TIFF file detected: {abs_path}")
 
             # Wait for the file to be completely written
             if not wait_for_file_stability(abs_path):
@@ -93,35 +90,19 @@ class TiffHandler(FileSystemEventHandler):
             # Add a small additional delay for safety
             time.sleep(0.5)
             
-            # Use retry logic for reading the file
-            metadata = self.get_raster_metadata_with_retry(abs_path)
-            self.sendmetadata(metadata)
+            # Process the file
+            metadata = self.get_raster_metadata(abs_path)
+            if metadata:
+                logger.info(f"Metadata extracted for {abs_path}, attempting send.")
+                self.sendmetadata(metadata)
+            else:
+                logger.error(f"Failed to extract metadata for {abs_path}")
             
         except Exception as e:
-            logger.error(f"Error Processing file: {str(e)}", exc_info=True)
-
-    def get_raster_metadata_with_retry(self, filepath, max_retries=3, retry_delay=2):
-        """Attempt to get metadata with retries if it fails"""
-        last_error = None
-        
-        for attempt in range(max_retries):
-            try:
-                return self.get_raster_metadata(filepath)
-            except Exception as e:
-                last_error = e
-                wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
-                logger.warning(f"Attempt {attempt+1} failed to get metadata. Retrying in {wait_time}s: {str(e)}")
-                time.sleep(wait_time)
-        
-        logger.error(f"All {max_retries} attempts failed: {str(last_error)}")
-        raise last_error
+            logger.error(f"Error processing file: {str(e)}", exc_info=True)
 
     def get_raster_metadata(self, filepath):
-        """ Extract comprehensive metadata from TIFF file"""
-        pattern = r'_(\d{2})([A-Z]{3})(\d{4})_(\d{4})_'  # _29MAR2024_0000_
-        pattern2 = r'^([^_]+_){4}'  # 3DIMG_29MAR2024_0000_L3B_
-        pattern3 = r'^([^_]+){1}'  # 3DIMG
-        pattern4 = r'V(\d{2})R(\d{2})'  # V01R00
+        """Extract comprehensive metadata from TIFF file with enhanced band value logging"""
         version = r'V(\d{2})'
         revision = r'R(\d{2})'
 
@@ -136,56 +117,75 @@ class TiffHandler(FileSystemEventHandler):
             'IMG_WV_RADIANCE', 'SNW','SGP','ASIA_MER',
         ]
 
-        print(os.path.basename(filepath))
-        print(os.path.basename(filepath).split("_")[-1])
+        filename = os.path.basename(filepath)
+        logger.info(f"Extracting metadata for: {filename}")
+        
         try:
-            with rasterio.open(filepath)as src:
-                # Determine image type based on filename and band count
-                filename = os.path.basename(filepath)
+            with rasterio.open(filepath) as src:
+                logger.info(f"File opened. Bands={src.count}, Dtypes={src.dtypes}, Shape={src.shape}")
                 filename_parts = filename.split("_")
+                file_nodata = src.nodata
+                
+                if file_nodata is not None:
+                    logger.info(f"File {filename} uses nodata value: {file_nodata}")
+                else:
+                    logger.warning(f"No nodata value defined in metadata for {filename}.")
+                
+                # Check if this is an L1B file (which needs masked arrays)
+                is_l1b_file = "_L1B_" in filename
+                
+                # Determine if we should use masking based on file type and nodata presence
+                should_use_masking = is_l1b_file or file_nodata is not None
+                logger.info(f"File type detection: is_l1b_file={is_l1b_file}")
                 
                 # Extract product code for L2B and L2C files
                 image_type = "UNKNOWN"  # Default value
                 
-                # Check for L2C pattern (e.g., 3RIMG_17APR2025_0045_L2C_INS_V01R00)
+                # Check for L2C pattern
                 if "_L2C_" in filename:
-                    # Find the part after L2C
                     for i, part in enumerate(filename_parts):
                         if part == "L2C" and i+1 < len(filename_parts):
-                            image_type = filename_parts[i+1]  # Get product code (INS, CMP, etc.)
+                            image_type = filename_parts[i+1]
                             break
                 
-                # Check for L2B pattern (e.g., 3RIMG_L2B_IMC)
+                # Check for L2B pattern
                 elif "_L2B_" in filename:
-                    # Find the part after L2B
                     for i, part in enumerate(filename_parts):
                         if part == "L2B" and i+1 < len(filename_parts):
-                            image_type = filename_parts[i+1]  # Get product code (IMC, etc.)
+                            image_type = filename_parts[i+1]
                             break
                 
-                # If not L2B/L2C or couldn't extract product code, use the existing logic
+                # Check for L1B pattern
+                elif "_L1B_" in filename:
+                    for i, part in enumerate(filename_parts):
+                        if part == "L1B" and i+1 < len(filename_parts):
+                            image_type = filename_parts[i+1]
+                            break
+                    if image_type == "UNKNOWN":
+                        image_type = "L1B"
+                
+                # If not L2B/L2C/L1B or couldn't extract product code, use the existing logic
                 elif src.count > 1:
                     image_type = "MULTI"
                 else:
-                    # For single band images that aren't L2B/L2C, use existing logic
                     if "IMG" in filename_parts:
-                        # Find the band type that comes after IMG
-                        img_index = filename_parts.index("IMG")
-                        if img_index < len(filename_parts) - 1:
-                            image_type = filename_parts[img_index + 1]  # Get band type (VIS, SWIR, TIR2, etc.)
+                        try:
+                            img_index = filename_parts.index("IMG")
+                            if img_index < len(filename_parts) - 1:
+                                image_type = filename_parts[img_index + 1]
+                        except ValueError:
+                            pass
                 
                 # Find any product code in the filename
                 product_code = "NONE"
 
                 # First check for codes in L2C and L2B files (most specific)
-                if "_L2C_" in filename or "_L2B_" in filename:
-                    # Use the already extracted image_type if it's not UNKNOWN
+                if "_L2C_" in filename or "_L2B_" in filename or "_L1B_" in filename:
                     if image_type != "UNKNOWN":
                         product_code = image_type
                 else:
                     # For other file types, check for each product code in the list
                     for code in PRODUCT_CODES:
-                        # Extract exact matches - look for code surrounded by underscores or at the end of filename
                         pattern = f"_{code}_|_{code}\\.|^{code}_"
                         if re.search(pattern, filename):
                             product_code = code
@@ -198,95 +198,159 @@ class TiffHandler(FileSystemEventHandler):
                             product_code = code
                             break
 
-                # Add debugging
-                print(f"Extracted product_code: {product_code} for file: {filename}")
+                logger.info(f"Determined image_type={image_type}, product_code={product_code}")
                 
+                # Check for FOG product which might need scaling
+                is_fog_product = product_code == "FOG"
+                scale_factor = 1/128 if is_fog_product else None
+                if scale_factor:
+                    logger.info(f"Using scale factor {scale_factor} for {product_code} product")
+                
+                # Process bands
                 bands_info = []
-                for band_idx in range(1, src.count+1):
-                    band = src.read(band_idx)
-                    
-                    # Set band description
-                    if src.count == 1:
-                        # For single band files, use the image_type as the description
-                        band_description = image_type
-                    else:
-                        # For multi-band files, use the original logic
-                        band_description = "unknown"
-                        try:
-                            if src.descriptions and len(src.descriptions) >= band_idx:
-                                if src.descriptions[band_idx-1]:
-                                    band_description = src.descriptions[band_idx-1]
-                        except Exception:
-                            # Fall back to default if description not available
-                            pass
-                    
-                    bands_info.append({
-                        "bandId": band_idx,
-                        "data_type": str(band.dtype),
-                        "min": float(band.min()),
-                        "max": float(band.max()),
-                        "minimum": float(band.min()),
-                        "maximum": float(band.max()),
-                        "mean": float(band.mean()),
-                        "stdDev": float(band.std()),
-                        "nodata_value": src.nodata,
-                        "description": band_description
-                    })
+                logger.info(f"Processing {src.count} bands with{'' if should_use_masking else 'out'} masking...")
                 
+                for band_idx in range(1, src.count + 1):
+                    logger.info(f"Processing band {band_idx}/{src.count}...")
+                    
+                    try:
+                        if should_use_masking:
+                            logger.info(f"Reading band {band_idx} with masking")
+                            band = src.read(band_idx, masked=True)
+                            
+                            if isinstance(band, np.ma.MaskedArray):
+                                valid_pixel_count = band.count()
+                                logger.info(f"Band {band_idx} has {valid_pixel_count} valid pixels")
+                                
+                                if valid_pixel_count > 0:
+                                    min_val = float(band.min())
+                                    max_val = float(band.max())
+                                    mean_val = float(band.mean(dtype=np.float64))
+                                    std_val = float(band.std(dtype=np.float64))
+                                    
+                                    logger.info(f"Raw band {band_idx} stats: min={min_val}, max={max_val}, mean={mean_val:.6f}, std={std_val:.6f}")
+                                    
+                                    # Apply scale factor if needed
+                                    if scale_factor:
+                                        min_val *= scale_factor
+                                        max_val *= scale_factor
+                                        mean_val *= scale_factor
+                                        std_val *= scale_factor
+                                        logger.info(f"Scaled band {band_idx} stats: min={min_val}, max={max_val}, mean={mean_val:.6f}, std={std_val:.6f}")
+                                else:
+                                    logger.warning(f"Band {band_idx} has no valid pixels")
+                                    min_val = max_val = mean_val = std_val = None
+                            else:
+                                logger.warning(f"Expected masked array but got {type(band)}")
+                                min_val = float(np.min(band))
+                                max_val = float(np.max(band))
+                                mean_val = float(np.mean(band, dtype=np.float64))
+                                std_val = float(np.std(band, dtype=np.float64))
+                                logger.info(f"Band {band_idx} stats: min={min_val}, max={max_val}, mean={mean_val:.6f}, std={std_val:.6f}")
+                        else:
+                            logger.info(f"Reading band {band_idx} without masking (standard approach)")
+                            band = src.read(band_idx)
+                            min_val = float(band.min())
+                            max_val = float(band.max())
+                            mean_val = float(band.mean())
+                            std_val = float(band.std())
+                            logger.info(f"Band {band_idx} stats: min={min_val}, max={max_val}, mean={mean_val:.6f}, std={std_val:.6f}")
+                            
+                            # Apply scale factor if needed
+                            if scale_factor:
+                                min_val *= scale_factor
+                                max_val *= scale_factor
+                                mean_val *= scale_factor
+                                std_val *= scale_factor
+                                logger.info(f"Scaled band {band_idx} stats: min={min_val}, max={max_val}, mean={mean_val:.6f}, std={std_val:.6f}")
+                        
+                        # Set band description
+                        if src.count == 1:
+                            band_description = image_type
+                        else:
+                            band_description = "unknown"
+                            try:
+                                if src.descriptions and len(src.descriptions) >= band_idx:
+                                    if src.descriptions[band_idx-1]:
+                                        band_description = src.descriptions[band_idx-1]
+                            except Exception as desc_e:
+                                logger.warning(f"Could not read band description: {desc_e}")
+                        
+                        bands_info.append({
+                            "bandId": band_idx,
+                            "data_type": str(band.dtype),
+                            "min": min_val,
+                            "max": max_val,
+                            "minimum": min_val,
+                            "maximum": max_val,
+                            "mean": mean_val,
+                            "stdDev": std_val,
+                            "nodata_value": file_nodata,
+                            "description": band_description
+                        })
+                        
+                        logger.info(f"---- Finished Processing Band {band_idx}/{src.count} ---")
+                        
+                    except Exception as band_e:
+                        logger.error(f"Error processing band {band_idx}: {str(band_e)}", exc_info=True)
+                
+                logger.info("Finished processing all bands. Assembling final metadata.")
+                
+                # Assemble metadata
                 metadata = {
-                    "filename": os.path.basename(filepath),
+                    "filename": filename,
                     "description": 'unknown',
-                    "satellite": os.path.basename(filepath).split("_")[0].split("IMG")[0],
-                    "processingLevel": os.path.basename(filepath).split("_")[3],
-                    "version":  re.search(version, str(os.path.basename(filepath)).split("_")[-1]).group(1),
-                    "revision": re.search(revision, str(os.path.basename(filepath)).split("_")[-1]).group(1),
-                    "productId": os.path.basename(filepath).split(".")[0],
+                    "satellite": filename.split("_")[0].split("IMG")[0],
+                    "processingLevel": filename.split("_")[3],
+                    "version": re.search(version, str(filename.split("_")[-1])).group(1),
+                    "revision": re.search(revision, str(filename.split("_")[-1])).group(1),
+                    "productId": filename.split(".")[0],
                     "filepath": os.path.dirname(filepath),
-                    "aquisition_datetime": extractTimeStamp(os.path.basename(filepath)),
-                    "type": image_type,  # The image type field
-                    "product_code": product_code,  # New field for product code
+                    "aquisition_datetime": extractTimeStamp(filename),
+                    "type": image_type,
+                    "product_code": product_code,
                     "coverage": {
                         "lat1": float(src.bounds.bottom),
                         "lat2": float(src.bounds.top),
                         "lon1": float(src.bounds.left),
                         "lon2": float(src.bounds.right)
-
                     },
                     "coordinateSystem": src.crs.to_string(),
                     "size": {
                         "width": src.width,
                         "height": src.height
                     },
-                    "cornerCoords":{
-                        "upperLeft":[src.bounds.left,src.bounds.top],
-                        "lowerLeft":[src.bounds.left,src.bounds.bottom],
-                        "lowerRight":[src.bounds.right,src.bounds.bottom],
-                        "upperRight":[src.bounds.right,src.bounds.top],
-                        "center":[
-                            (src.bounds.left+src.bounds.right)/2,
-                            (src.bounds.top+src.bounds.bottom)/2
-                            
-                            ]
-                        },
+                    "cornerCoords": {
+                        "upperLeft": [src.bounds.left, src.bounds.top],
+                        "lowerLeft": [src.bounds.left, src.bounds.bottom],
+                        "lowerRight": [src.bounds.right, src.bounds.bottom],
+                        "upperRight": [src.bounds.right, src.bounds.top],
+                        "center": [
+                            (src.bounds.left + src.bounds.right) / 2,
+                            (src.bounds.top + src.bounds.bottom) / 2
+                        ]
+                    },
                     "bands": bands_info
-
                 }
+                
+                logger.info(f"---- Finished get_raster_metadata for: {filepath} ---")
                 return metadata
+                
         except Exception as e:
-            logger.error(f"Error getting metadata from file :{str(e)}")
-            raise
+            logger.error(f"Error getting metadata from file {filepath}: {str(e)}", exc_info=True)
+            return None
 
     def sendmetadata(self, metadata):
         """Send metadata to API endpoint"""
         try:
+            logger.info(f"Sending metadata for {metadata['filename']} to {self.api_endpoint}")
             response = requests.post(
                 self.api_endpoint,
                 json=metadata,
                 headers={'Content-Type': 'application/json'}
             )
             response.raise_for_status()
-            logger.info(
-                f"Sent metadata successfully for {metadata['filename']}")
+            logger.info(f"Sent metadata successfully for {metadata['filename']} (Status: {response.status_code})")
         except requests.exceptions.RequestException as e:
             logger.error(f"Error sending metadata: {str(e)}")
 
@@ -313,6 +377,11 @@ def watch_directory(path, api_endpoint):
 
 
 if __name__ == "__main__":
+    logger.info("Metadata Extractor Script Started.")
+    logger.info(f"Watching directory: /home/sbn/baivab/final")
+    logger.info(f"Sending metadata to: http://localhost:7000/api/metadata/save")
+    logger.info(f"Logging level set to: {logging.getLevelName(logger.level)}")
+    
     # WATCH_DIR = "/home/sbn/baivab/cog-testing/metadata-extractor/COG/final_dir"
     WATCH_DIR = "/home/sbn/baivab/final"
     API_ENDPOINT = "http://localhost:7000/api/metadata/save"
