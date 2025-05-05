@@ -12,6 +12,9 @@ from watchdog.observers import Observer
 from pathlib import Path
 import re
 import numpy as np
+import configparser
+import ast
+import argparse # Import argparse
 
 # --- Logging Setup ---
 log_formatter = logging.Formatter('%(asctime)s-%(levelname)s-%(message)s')
@@ -22,6 +25,9 @@ logger.setLevel(logging.INFO) # Set base level to INFO
 stream_handler = logging.StreamHandler()
 stream_handler.setFormatter(log_formatter)
 logger.addHandler(stream_handler)
+
+# Global variable to hold loaded configuration
+CONFIG = None
 
 # --- Helper Functions ---
 def extractTimeStamp(filepath):
@@ -89,11 +95,11 @@ def wait_for_file_stability(filepath, timeout=30, check_interval=0.5):
 def get_band_stats_from_gdal(band_info):
     """Extract band statistics from GDAL band info"""
     min_val = max_val = mean_val = std_val = None
-    
+
     # Check for statistics in band metadata
     if 'metadata' in band_info and '' in band_info['metadata']:
         metadata = band_info['metadata']['']
-        
+
         # Try to get stats from metadata
         if 'STATISTICS_MINIMUM' in metadata and 'STATISTICS_MAXIMUM' in metadata:
             min_val = float(metadata.get('STATISTICS_MINIMUM'))
@@ -105,24 +111,46 @@ def get_band_stats_from_gdal(band_info):
             max_val = float(metadata.get('MAX'))
             mean_val = float(metadata.get('MEAN', 0))
             std_val = float(metadata.get('STD_DEV', 0))
-    
+
     # If stats not available in metadata, check if they're in the band info directly
     if min_val is None and 'min' in band_info and 'max' in band_info:
         min_val = float(band_info.get('min'))
         max_val = float(band_info.get('max'))
         mean_val = float(band_info.get('mean', 0))
         std_val = float(band_info.get('stdDev', 0))
-    
-    logger.info(f"Band stats from GDAL: min={min_val}, max={max_val}, mean={mean_val}, stdDev={std_val}")
+
+    logger.debug(f"Band stats from GDAL: min={min_val}, max={max_val}, mean={mean_val}, stdDev={std_val}")
     return min_val, max_val, mean_val, std_val
+
+def parse_dictionary_string(config_string):
+    """Parse a dictionary string from config file into a Python dictionary."""
+    if not config_string:
+        return {}
+
+    # Remove any surrounding quotes
+    if (config_string.startswith('"') and config_string.endswith('"')) or \
+       (config_string.startswith("'") and config_string.endswith("'")):
+        config_string = config_string[1:-1]
+
+    try:
+        # Try to parse with ast.literal_eval
+        result = ast.literal_eval(config_string)
+        if isinstance(result, dict):
+            return result
+        else:
+            logger.warning(f"Config string parsed but is not a dictionary: {type(result)}")
+            return {}
+    except (SyntaxError, ValueError) as e:
+        logger.error(f"Failed to parse dictionary string: {str(e)}")
+        return {}
 
 # --- Simplified Image Type and Product Code Logic ---
 def extract_image_type_and_product(filename, PRODUCT_CODES, gdal_info=None):
     """Extract image type and product code from filename using consistent logic"""
     filename_parts = filename.split("_")
     image_type = "UNKNOWN"
-    product_code = "NONE"
-    
+    product_code = "STD"
+
     # Check for L2C pattern (higher priority)
     if "_L2C_" in filename:
         # Find the part after L2C
@@ -131,7 +159,7 @@ def extract_image_type_and_product(filename, PRODUCT_CODES, gdal_info=None):
                 image_type = filename_parts[i+1]  # Get product code (INS, CMP, etc.)
                 product_code = image_type  # For L2C, use image_type as product_code
                 break
-    
+
     # Check for L2B pattern
     elif "_L2B_" in filename:
         # Find the part after L2B
@@ -140,7 +168,7 @@ def extract_image_type_and_product(filename, PRODUCT_CODES, gdal_info=None):
                 image_type = filename_parts[i+1]  # Get product code (IMC, etc.)
                 product_code = image_type  # For L2B, use image_type as product_code
                 break
-    
+
     # Check for L2G pattern
     elif "_L2G_" in filename:
         # Find the part after L2G
@@ -149,7 +177,7 @@ def extract_image_type_and_product(filename, PRODUCT_CODES, gdal_info=None):
                 image_type = filename_parts[i+1]  # Get product code
                 product_code = image_type  # For L2G, use image_type as product_code
                 break
-    
+
     # Check for L2P pattern
     elif "_L2P_" in filename:
         # Find the part after L2P
@@ -158,33 +186,71 @@ def extract_image_type_and_product(filename, PRODUCT_CODES, gdal_info=None):
                 image_type = filename_parts[i+1]  # Get product code
                 product_code = image_type  # For L2P, use image_type as product_code
                 break
-                
+
     # Check for multi-band images
     elif gdal_info and 'bands' in gdal_info and len(gdal_info['bands']) > 1:
         image_type = "MULTI"
-    
+
     # Check for IMG specific pattern
     elif "IMG" in filename_parts:
         try:
             img_index = filename_parts.index("IMG")
-            if img_index < len(filename_parts) - 1: 
+            if img_index < len(filename_parts) - 1:
                 image_type = filename_parts[img_index + 1]
         except ValueError:
             pass
-    
+
     # If still no product code, try to match against known product codes
     if product_code == "NONE":
-        for code in PRODUCT_CODES:
-            pattern = f"_{code}_|_{code}\\.|^{code}_|{code}$"
-            if re.search(pattern, filename.replace('.cog.tif', '')):
-                product_code = code
-                # If we still don't have an image type, use the product code
-                if image_type == "UNKNOWN":
-                    image_type = code
-                break
-    
-    logger.info(f"Extracted: image_type={image_type}, product_code={product_code}")
+        if not PRODUCT_CODES:
+            logger.warning("PRODUCT_CODES list is empty or not loaded. Cannot match product code from filename.")
+        else:
+            for code in PRODUCT_CODES:
+                pattern = f"_{code}_|_{code}\\.|^{code}_|{code}$"
+                if re.search(pattern, filename.replace('.cog.tif', '')):
+                    product_code = code
+                    # If we still don't have an image type, use the product code
+                    if image_type == "UNKNOWN":
+                        image_type = code
+                    break
+
+    logger.debug(f"Extracted: image_type={image_type}, product_code={product_code}")
     return image_type, product_code
+
+# --- Configuration Loading ---
+def load_config(config_path):
+    """Load configuration from the specified config file path."""
+    global CONFIG # Use the global CONFIG variable
+    config = configparser.ConfigParser()
+
+    if not config_path or not os.path.exists(config_path):
+        logger.error(f"Configuration file not found or not specified: {config_path}")
+        CONFIG = None
+        return False
+
+    try:
+        logger.info(f"Loading configuration from: {config_path}")
+        config.read(config_path)
+        CONFIG = config # Store loaded config globally
+        # Validate essential config sections/keys
+        if 'METADATA_EXTRACTION' not in CONFIG:
+            logger.error("Config file is missing the [METADATA_EXTRACTION] section.")
+            CONFIG = None
+            return False
+        if 'PRODUCT_CODES' not in CONFIG['METADATA_EXTRACTION']:
+             logger.error("Config file is missing 'PRODUCT_CODES' under [METADATA_EXTRACTION].")
+             CONFIG = None
+             return False
+        return True
+    except configparser.Error as e:
+        logger.error(f"Error parsing configuration file {config_path}: {e}")
+        CONFIG = None
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error loading configuration from {config_path}: {e}")
+        CONFIG = None
+        return False
+
 
 # --- TiffHandler Class (Watchdog Event Handler) ---
 class TiffHandler(FileSystemEventHandler):
@@ -197,7 +263,6 @@ class TiffHandler(FileSystemEventHandler):
         filepath = event.src_path
         if event.is_directory or not filepath.lower().endswith('.cog.tif'):
             # Ignore directories and non-COG TIFF files
-            # Log ignored files only if necessary, otherwise return silently
             # logger.debug(f"Ignoring event (directory or wrong extension): {filepath}")
             return
 
@@ -221,7 +286,7 @@ class TiffHandler(FileSystemEventHandler):
             metadata = self.get_raster_metadata_with_retry(abs_path)
 
             if metadata:
-                 logger.info(f"Metadata extracted for {abs_path}, attempting send.")
+                 logger.info(f"Metadata extraction successful for {abs_path}, attempting send.")
                  self.sendmetadata(metadata)
             else:
                  logger.warning(f"Metadata extraction failed for {abs_path}, not sending.")
@@ -244,7 +309,8 @@ class TiffHandler(FileSystemEventHandler):
                 # Call the main metadata extraction function
                 metadata = self.get_raster_metadata(filepath)
                 if metadata is not None:
-                    logger.info(f"Metadata extraction successful on attempt {attempt + 1} for {filepath}")
+                    # No need to log success here, it's logged in on_created
+                    # logger.info(f"Metadata extraction successful on attempt {attempt + 1} for {filepath}")
                     return metadata # Success
                 else:
                     # Case where get_raster_metadata handled an error internally and returned None
@@ -268,18 +334,60 @@ class TiffHandler(FileSystemEventHandler):
 
     def get_raster_metadata(self, filepath):
         """Extracts metadata from a single raster file using GDAL."""
-        # Define patterns and codes (consider moving PRODUCT_CODES to a config file or constant module)
+        global CONFIG # Access the globally loaded config
+        if CONFIG is None:
+            logger.error("Configuration not loaded. Cannot extract metadata.")
+            return None
+
+        # Define patterns
         version_pattern = r'V(\d{2})'
         revision_pattern = r'R(\d{2})'
-        PRODUCT_CODES = [
-            'UTH', 'OLR', 'CMK', 'HEM', 'LST', 'SST', 'IMC', 'DHI', 'DNI', 'GHI', 'INS', 'FOG', 'CMP', 'IMR',
-            'AOD', 'GPI', 'PET_DLY', 'GHI_DLY', 'DNI_DLY', 'DHI_DLY', 'INS_DLY', 'HEM_DLY',
-            'LST_MAX_DLY', 'LST_MIN_DLY', 'UTH_DLY', 'OLR_DLY', 'SST_DLY', 'IMC_DLY', 'SWR_DLY',
-            'IMG_TIR1_TEMP', 'IMG_TIR2_TEMP', 'IMG_MIR_TEMP', 'IMG_WV_TEMP', 'IMG_VIS_RADIANCE',
-            'IMG_SWIR_RADIANCE', 'IMG_TIR1_RADIANCE', 'IMG_TIR2_RADIANCE', 'IMG_MIR_RADIANCE',
-            'IMG_WV_RADIANCE', 'SNW', 'SGP', 'ASIA_MER', 'IMG_SWIR', 'IMG_VIS', 'IMG_TIR1', 'IMG_TIR2', 
-            'IMG_MIR', 'IMG_WV', 'CTP', 'WV_MERGED', 'WDP', 'FIR', 'IRW', 'MRW', 'WVW', 'VSW',
-        ]
+
+        # Get settings from the loaded config
+        PRODUCT_CODES = []
+        product_display_names = {}
+        processing_level_display_names = {}
+
+        try:
+            if 'METADATA_EXTRACTION' in CONFIG:
+                config_section = CONFIG['METADATA_EXTRACTION']
+
+                # Get product codes (Mandatory)
+                if 'PRODUCT_CODES' in config_section:
+                    PRODUCT_CODES = [code.strip() for code in config_section['PRODUCT_CODES'].split(',') if code.strip()]
+                    if not PRODUCT_CODES:
+                         logger.error("PRODUCT_CODES in config is empty.")
+                         return None # Cannot proceed without product codes
+                else:
+                    logger.error("PRODUCT_CODES missing from [METADATA_EXTRACTION] section in config.")
+                    return None # Cannot proceed without product codes
+
+                # Get PRODUCT_DISPLAY_NAME (Optional)
+                if 'PRODUCT_DISPLAY_NAME' in config_section:
+                    product_display_names_str = config_section['PRODUCT_DISPLAY_NAME']
+                    logger.debug(f"Raw product display names string (first 50 chars): {product_display_names_str[:50]}...")
+                    product_display_names = parse_dictionary_string(product_display_names_str)
+                    logger.debug(f"Successfully loaded {len(product_display_names)} product display names")
+                else:
+                    logger.warning("PRODUCT_DISPLAY_NAME not found in config. Product codes will be used as display names.")
+
+                # Get PROCESSING_LEVEL_DISPLAY_NAME (Optional)
+                if 'PROCESSING_LEVEL_DISPLAY_NAME' in config_section:
+                    proc_level_names_str = config_section['PROCESSING_LEVEL_DISPLAY_NAME']
+                    processing_level_display_names = parse_dictionary_string(proc_level_names_str)
+                    logger.debug(f"Successfully loaded {len(processing_level_display_names)} processing level display names")
+                else:
+                    logger.warning("PROCESSING_LEVEL_DISPLAY_NAME not found in config. Processing levels will be used as display names.")
+            else:
+                logger.error("[METADATA_EXTRACTION] section missing from config.")
+                return None
+
+        except KeyError as e:
+             logger.error(f"Missing key in config section [METADATA_EXTRACTION]: {e}")
+             return None
+        except Exception as e:
+            logger.error(f"Error reading configuration settings: {str(e)}", exc_info=True)
+            return None
 
         filename = os.path.basename(filepath)
         logger.info(f"Extracting metadata for: {filename}")
@@ -287,75 +395,75 @@ class TiffHandler(FileSystemEventHandler):
 
         try:
             # Open dataset with GDAL
-            logger.info(f"Opening file with GDAL: {filepath}")
+            logger.debug(f"Opening file with GDAL: {filepath}")
             ds = gdal.Open(filepath)
             if ds is None:
                 logger.error(f"Failed to open the file with GDAL: {filepath}")
                 return None
-                
+
             # Get detailed GDAL info as JSON
-            logger.info(f"Retrieving GDAL info for: {filepath}")
+            logger.debug(f"Retrieving GDAL info for: {filepath}")
             gdal_info_str = gdal.Info(ds, deserialize=False, format='json')
             gdal_info = json.loads(gdal_info_str)
-            
-            logger.info(f"File opened. Bands={gdal_info.get('bands', [])}, Size={gdal_info.get('size', [])}")
-            
+
+            logger.debug(f"File opened. Bands={gdal_info.get('bands', [])}, Size={gdal_info.get('size', [])}")
+
             # Get filename parts
             filename_parts = filename.split("_")
             file_nodata = None
             if 'bands' in gdal_info and len(gdal_info['bands']) > 0:
                 if 'noDataValue' in gdal_info['bands'][0]:
                     file_nodata = gdal_info['bands'][0]['noDataValue']
-            
+
             if file_nodata is not None:
-                logger.info(f"File {filename} uses nodata value: {file_nodata}")
+                logger.debug(f"File {filename} uses nodata value: {file_nodata}")
             else:
                 logger.warning(f"No nodata value defined in metadata for {filename}.")
 
             # --- Image Type and Product Code Logic ---
             image_type, product_code = extract_image_type_and_product(filename, PRODUCT_CODES, gdal_info)
-            logger.info(f"Determined image_type={image_type}, product_code={product_code}")
+            logger.debug(f"Determined image_type={image_type}, product_code={product_code}")
             # --- End Image Type / Product Code ---
 
             # Process bands
             bands_info = []
             band_count = len(gdal_info.get('bands', []))
-            logger.info(f"Processing {band_count} bands...")
-            
+            logger.debug(f"Processing {band_count} bands...")
+
             for band_idx, band_info in enumerate(gdal_info.get('bands', []), 1):
-                logger.info(f"--- Processing Band {band_idx}/{band_count} ---")
-                
+                logger.debug(f"--- Processing Band {band_idx}/{band_count} ---")
+
                 # Get band type
                 band_data_type = band_info.get('type', 'Unknown')
-                
+
                 # Extract band statistics
                 min_val, max_val, mean_val, std_val = get_band_stats_from_gdal(band_info)
-                
+
                 # Get band description
                 band_description = "unknown"
                 if 'description' in band_info:
                     band_description = band_info['description']
                 elif band_count == 1:
                     band_description = image_type if image_type != "UNKNOWN" else product_code
-                
+
                 # Add band info to our collection
                 bands_info.append({
-                    "bandId": band_idx, 
+                    "bandId": band_idx,
                     "data_type": band_data_type,
-                    "min": min_val, 
-                    "max": max_val, 
-                    "minimum": min_val, 
+                    "min": min_val,
+                    "max": max_val,
+                    "minimum": min_val,
                     "maximum": max_val,
-                    "mean": mean_val, 
+                    "mean": mean_val,
                     "stdDev": std_val,
                     "nodata_value": band_info.get('noDataValue', file_nodata),
                     "description": band_description
                 })
-                
-                logger.info(f"--- Finished Processing Band {band_idx}/{band_count} ---")
+
+                logger.debug(f"--- Finished Processing Band {band_idx}/{band_count} ---")
             # End of band loop
 
-            logger.info("Finished processing all bands. Assembling final metadata.")
+            logger.debug("Finished processing all bands. Assembling final metadata.")
 
             # --- Assemble Metadata Dictionary Safely ---
             sat_match = "UNKNOWN"; processingLevel = "UNKNOWN"; version = None; revision = None; productId = "UNKNOWN"; aquisition_datetime = None
@@ -383,24 +491,84 @@ class TiffHandler(FileSystemEventHandler):
                 'top': corner_coords.get('upperLeft', [0, 0])[1],
                 'bottom': corner_coords.get('lowerRight', [0, 0])[1]
             }
-            
+
+            # Determine processing level display name
+            try:
+                level_code = None
+                # First character of the processing level indicates the main level (L1, L2, L3)
+                if processingLevel.startswith("L1"):
+                    level_code = "LEVEL1"
+                elif processingLevel.startswith("L2"):
+                    level_code = "LEVEL2"
+                elif processingLevel.startswith("L3"):
+                    level_code = "LEVEL3"
+
+                # Get the display names from config (or use defaults if not found)
+                product_display_name = product_code # Default
+                processing_level_display_name = processingLevel # Default
+
+                # Make sure product_display_names is a dictionary before indexing
+                if isinstance(product_display_names, dict) and product_display_names:
+                    logger.debug(f"Looking up product code '{product_code}' in dictionary with {len(product_display_names)} entries")
+                    logger.debug(f"Product code type: {type(product_code)}, Example key type: {type(list(product_display_names.keys())[0])}")
+                    product_keys = list(product_display_names.keys())
+                    logger.debug(f"Available product keys (first 5): {product_keys[:5]}")
+                    # Try exact match first
+                    if product_code in product_display_names:
+                        product_display_name = product_display_names[product_code]
+                        logger.debug(f"Found product display name in config (exact match): {product_code} -> {product_display_name}")
+                    # Try case-insensitive match
+                    else:
+                        found_case_insensitive = False
+                        for k in product_keys:
+                            if k.upper() == product_code.upper():
+                                product_display_name = product_display_names[k]
+                                logger.debug(f"Found product display name in config (case-insensitive): {product_code} -> {product_display_name}")
+                                found_case_insensitive = True
+                                break
+                        if not found_case_insensitive:
+                             logger.warning(f"Product code '{product_code}' not found in PRODUCT_DISPLAY_NAME config. Using code itself.")
+                elif not product_display_names:
+                     logger.debug("Product display names dictionary is empty. Using product code as display name.")
+                else:
+                    logger.warning(f"product_display_names is not a dictionary but a {type(product_display_names)}. Using product code as display name.")
+
+
+                # Make sure processing_level_display_names is a dictionary before indexing
+                if isinstance(processing_level_display_names, dict) and processing_level_display_names and level_code in processing_level_display_names:
+                    processing_level_display_name = processing_level_display_names[level_code]
+                    logger.debug(f"Found processing level display name in config: {level_code} -> {processing_level_display_name}")
+                elif not processing_level_display_names:
+                     logger.debug("Processing level display names dictionary is empty. Using processing level as display name.")
+                else:
+                    logger.warning(f"Level code '{level_code}' not found in PROCESSING_LEVEL_DISPLAY_NAME config or config is not a dictionary. Using original value.")
+
+                logger.debug(f"DISPLAY NAME MAPPING: Product: {product_code} -> {product_display_name}")
+                logger.debug(f"DISPLAY NAME MAPPING: Processing Level: {processingLevel} ({level_code}) -> {processing_level_display_name}")
+            except Exception as e:
+                logger.error(f"Error determining display names: {str(e)}", exc_info=True)
+                product_display_name = product_code # Fallback
+                processing_level_display_name = processingLevel # Fallback
+
             # Assemble metadata structure
             metadata = {
-                "filename": filename, 
-                "description": gdal_info.get('description', 'unknown'), 
-                "satellite": sat_match, 
+                "filename": filename,
+                "description": gdal_info.get('description', 'unknown'),
+                "satellite": sat_match,
                 "processingLevel": processingLevel,
-                "version": version, 
-                "revision": revision, 
+                "processingLevelDisplayName": processing_level_display_name,
+                "version": version,
+                "revision": revision,
                 "productId": productId,
-                "filepath": os.path.abspath(os.path.dirname(filepath)), 
+                "filepath": os.path.abspath(os.path.dirname(filepath)),
                 "aquisition_datetime": aquisition_datetime,
-                "type": image_type, 
+                "type": image_type,
                 "product_code": product_code,
+                "productDisplayName": product_display_name,
                 "coverage": {
-                    "lat1": float(bounds['bottom']), 
-                    "lat2": float(bounds['top']), 
-                    "lon1": float(bounds['left']), 
+                    "lat1": float(bounds['bottom']),
+                    "lat2": float(bounds['top']),
+                    "lon1": float(bounds['left']),
                     "lon2": float(bounds['right'])
                 },
                 "coordinateSystem": gdal_info.get('coordinateSystem', {}).get('wkt', None) if 'coordinateSystem' in gdal_info else None,
@@ -423,9 +591,10 @@ class TiffHandler(FileSystemEventHandler):
             # Catch-all for unexpected errors during metadata assembly
             logger.error(f"Unexpected error getting metadata from file {filepath}: {str(e)}", exc_info=True)
             metadata = None
-            raise # Re-raise to trigger retry logic
+            # Do not re-raise here, let the retry logic handle it based on return value
+            return None # Indicate failure for this attempt
 
-        logger.info(f"--- Finished get_raster_metadata for: {filepath} ---")
+        logger.info(f"Finished metadata extraction for: {filename}")
         return metadata
 
 
@@ -434,8 +603,19 @@ class TiffHandler(FileSystemEventHandler):
         if not metadata:
              logger.warning("Skipping sending metadata because it's empty.")
              return
+        filename = metadata.get('filename', 'Unknown File')
+        
+        # Print metadata before sending
+        print("\n" + "="*80)
+        print(f"METADATA FOR: {filename}")
+        print("="*80)
+        import pprint
+        pprint.pprint(metadata)
+        print("="*80 + "\n")
+        
         try:
-            logger.info(f"Sending metadata for {metadata.get('filename', 'Unknown File')} to {self.api_endpoint}")
+            logger.info(f"Sending metadata for {filename} to {self.api_endpoint}")
+            logger.debug(f"Metadata payload: {json.dumps(metadata)}")
             response = requests.post(
                 self.api_endpoint,
                 json=metadata,
@@ -443,29 +623,35 @@ class TiffHandler(FileSystemEventHandler):
                 timeout=60 # Timeout for the request
             )
             response.raise_for_status() # Check for HTTP errors (4xx, 5xx)
-            logger.info(f"Sent metadata successfully for {metadata.get('filename', 'Unknown File')} (Status: {response.status_code})")
+            logger.info(f"Sent metadata successfully for {filename} (Status: {response.status_code})")
         except requests.exceptions.Timeout:
-             logger.error(f"Timeout error sending metadata for {metadata.get('filename', 'Unknown File')} to {self.api_endpoint}")
+             logger.error(f"Timeout error sending metadata for {filename} to {self.api_endpoint}")
         except requests.exceptions.ConnectionError as ce:
-             logger.error(f"Connection error sending metadata for {metadata.get('filename', 'Unknown File')} to {self.api_endpoint}: {ce}")
+             logger.error(f"Connection error sending metadata for {filename} to {self.api_endpoint}: {ce}")
         except requests.exceptions.HTTPError as http_err:
-             logger.error(f"HTTP error sending metadata for {metadata.get('filename', 'Unknown File')}: {http_err.response.status_code} - {http_err.response.text}")
+             logger.error(f"HTTP error sending metadata for {filename}: {http_err.response.status_code} - {http_err.response.text}")
         except requests.exceptions.RequestException as e:
             # Catch other potential requests errors
-            logger.error(f"Error sending metadata for {metadata.get('filename', 'Unknown File')}: {str(e)}")
+            logger.error(f"Error sending metadata for {filename}: {str(e)}")
         except Exception as e:
              # Catch unexpected errors during the send process
-             logger.error(f"Unexpected error during metadata sending for {metadata.get('filename', 'Unknown File')}: {str(e)}", exc_info=True)
+             logger.error(f"Unexpected error during metadata sending for {filename}: {str(e)}", exc_info=True)
 
 
 # --- Directory Watching Logic ---
 def watch_directory(path, api_endpoint):
     """Sets up and starts the directory watcher."""
     abs_path = os.path.abspath(path)
-    if not os.path.exists(abs_path):
+    if not os.path.isdir(abs_path): # Check if it's a directory
         try:
-            os.makedirs(abs_path, exist_ok=True)
-            logger.info(f"Created directory: {abs_path}")
+            # If it doesn't exist, try creating it
+            if not os.path.exists(abs_path):
+                os.makedirs(abs_path, exist_ok=True)
+                logger.info(f"Created directory: {abs_path}")
+            else:
+                # If it exists but isn't a directory
+                logger.error(f"Watch path exists but is not a directory: {abs_path}")
+                return
         except OSError as e:
              logger.error(f"Failed to create directory {abs_path}: {e}")
              return # Cannot watch if directory creation fails
@@ -502,29 +688,64 @@ def watch_directory(path, api_endpoint):
 
 # --- Main Execution Block ---
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Watch a directory for new COG TIFF files, extract metadata, and send it to an API.")
+    parser.add_argument("config_file", help="Path to the configuration INI file.")
+    parser.add_argument("-w", "--watch-dir", help="Directory to watch for new files (overrides config/environment).")
+    parser.add_argument("-a", "--api-endpoint", help="API endpoint to send metadata to (overrides config/environment).")
+    parser.add_argument("-l", "--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"], help="Set the logging level (default: INFO).")
+
+    args = parser.parse_args()
+
+    # --- Configure Logging ---
+    log_level_str = args.log_level.upper()
+    log_level = getattr(logging, log_level_str, logging.INFO)
+    logger.setLevel(log_level)
+    # Update handler level too if needed, though base logger level usually suffices
+    for handler in logger.handlers:
+        handler.setLevel(log_level)
+    logger.info(f"Logging level set to: {log_level_str}")
+
     logger.info("Metadata Extractor Script Started.")
-    # Get config from environment variables or use defaults
-    WATCH_DIR = os.environ.get("WATCH_DIR", "/home/sbn/baivab/final") # Adjust default as needed
-    API_ENDPOINT = os.environ.get("API_ENDPOINT", "http://localhost:7000/api/metadata/save") # Adjust default as needed
+
+    # --- Load Configuration ---
+    if not load_config(args.config_file):
+        logger.critical("Failed to load configuration. Exiting.")
+        exit(1) # Exit if config loading fails
+
+    # --- Determine Watch Directory and API Endpoint ---
+    # Priority: Command-line > Environment Variable > Config File
+    WATCH_DIR = args.watch_dir or \
+                os.environ.get("WATCH_DIR") or \
+                CONFIG.get('DEFAULT', 'WatchDirectory', fallback=None) or \
+                CONFIG.get('METADATA_EXTRACTION', 'WATCH_DIR', fallback=None)
+
+    API_ENDPOINT = args.api_endpoint or \
+                   os.environ.get("API_ENDPOINT") or \
+                   CONFIG.get('DEFAULT', 'ApiEndpoint', fallback=None) or \
+                   CONFIG.get('METADATA_EXTRACTION', 'METADATA_SENDING_ENDPOINT', fallback=None)
+
+    if not WATCH_DIR:
+        logger.critical("Watch directory not specified via command-line, environment variable, or config file. Exiting.")
+        exit(1)
+    if not API_ENDPOINT:
+        logger.critical("API endpoint not specified via command-line, environment variable, or config file. Exiting.")
+        exit(1)
 
     logger.info(f"Watching directory: {WATCH_DIR}")
     logger.info(f"Sending metadata to: {API_ENDPOINT}")
 
-    # Optional: Set logger level via environment variable for easier debugging
-    log_level_str = os.environ.get("LOG_LEVEL", "INFO").upper()
-    log_level = getattr(logging, log_level_str, logging.INFO)
-    logger.setLevel(log_level)
-    logger.info(f"Logging level set to: {log_level_str}")
-    # To enable DEBUG logging, set environment variable: export LOG_LEVEL=DEBUG
+    # --- Configure GDAL ---
+    try:
+        gdal.UseExceptions()  # Enable exceptions from GDAL
+        logger.debug("GDAL configured to use exceptions")
+    except AttributeError:
+        logger.warning("Could not configure GDAL exceptions (might be an older version or setup issue).")
 
-    # Configure GDAL
-    gdal.UseExceptions()  # Enable exceptions from GDAL
-    logger.info("GDAL configured to use exceptions")
-
-    # Validate API endpoint format
+    # --- Validate API endpoint format ---
     if not API_ENDPOINT.startswith(("http://", "https://")):
         logger.error(f"Invalid API_ENDPOINT format: {API_ENDPOINT}. Should start with http:// or https://")
     else:
+        # --- Start Watching ---
         watch_directory(WATCH_DIR, API_ENDPOINT)
 
     logger.info("Metadata Extractor Script Finished.")
